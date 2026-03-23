@@ -7,17 +7,27 @@
         "data": {
           "email": "Email",
           "password": "Password",
+          "am_enabled": "Enable morning bus websocket window",
           "am_start": "Morning websocket start (HH:MM)",
           "am_end": "Morning websocket end (HH:MM)",
+          "pm_enabled": "Enable afternoon bus websocket window",
           "pm_start": "Afternoon websocket start (HH:MM)",
-          "pm_end": "Afternoon websocket end (HH:MM)"
+          "pm_end": "Afternoon websocket end (HH:MM)",
+          "day_m": "Monday (M)",
+          "day_t": "Tuesday (T)",
+          "day_w": "Wednesday (W)",
+          "day_r": "Thursday (R)",
+          "day_f": "Friday (F)",
+          "day_sa": "Saturday",
+          "day_su": "Sunday"
         }
       }
     },
     "error": {
       "auth_failed": "Authentication failed",
       "am_window_invalid": "Morning window must be <= 2 hours and end after start",
-      "pm_window_invalid": "Afternoon window must be <= 2 hours and end after start"
+      "pm_window_invalid": "Afternoon window must be <= 2 hours and end after start",
+      "no_days_selected": "Select at least one active weekday"
     }
   },
   "options": {
@@ -26,16 +36,26 @@
         "title": "FirstView Options",
         "description": "Update morning/afternoon websocket windows.",
         "data": {
+          "am_enabled": "Enable morning bus websocket window",
           "am_start": "Morning websocket start (HH:MM)",
           "am_end": "Morning websocket end (HH:MM)",
+          "pm_enabled": "Enable afternoon bus websocket window",
           "pm_start": "Afternoon websocket start (HH:MM)",
-          "pm_end": "Afternoon websocket end (HH:MM)"
+          "pm_end": "Afternoon websocket end (HH:MM)",
+          "day_m": "Monday (M)",
+          "day_t": "Tuesday (T)",
+          "day_w": "Wednesday (W)",
+          "day_r": "Thursday (R)",
+          "day_f": "Friday (F)",
+          "day_sa": "Saturday",
+          "day_su": "Sunday"
         }
       }
     },
     "error": {
       "am_window_invalid": "Morning window must be <= 2 hours and end after start",
-      "pm_window_invalid": "Afternoon window must be <= 2 hours and end after start"
+      "pm_window_invalid": "Afternoon window must be <= 2 hours and end after start",
+      "no_days_selected": "Select at least one active weekday"
     }
   }
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -38,9 +39,19 @@ class FirstViewMetricSensor(CoordinatorEntity[FirstViewCoordinator], SensorEntit
 
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, key: str, name: str, data_key: str) -> None:
         super().__init__(coordinator)
+        self._entry_id = entry_id
         self._data_key = data_key
         self._attr_unique_id = f"{entry_id}_{key}"
         self._attr_name = name
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry_id)},
+            name="FirstView",
+            manufacturer="FirstView",
+            model="Cloud Integration",
+        )
 
     @property
     def native_value(self):
@@ -61,7 +72,17 @@ class FirstViewWsStatusSensor(CoordinatorEntity[FirstViewCoordinator], SensorEnt
 
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str) -> None:
         super().__init__(coordinator)
+        self._entry_id = entry_id
         self._attr_unique_id = f"{entry_id}_ws_status"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry_id)},
+            name="FirstView",
+            manufacturer="FirstView",
+            model="Cloud Integration",
+        )
 
     @property
     def native_value(self):
@@ -71,4 +92,8 @@ class FirstViewWsStatusSensor(CoordinatorEntity[FirstViewCoordinator], SensorEnt
     @property
     def extra_state_attributes(self):
         last = (self.coordinator.data or {}).get("last_ws_event")
-        return {"last_event_type": last.get("type") if isinstance(last, dict) else None}
+        data = self.coordinator.data or {}
+        return {
+            "last_event_type": last.get("type") if isinstance(last, dict) else None,
+            "socket_enabled": data.get("socket_enabled", True),
+        }
