@@ -34,4 +34,3 @@ Custom Home Assistant integration for FirstView monitoring.
 ## Notes
 
 - Uses Cognito SRP login via `pycognito`.
-- This folder is intentionally standalone for its own repository.
