@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "FirstView Setup",
+        "description": "Enter FirstView credentials and websocket active windows.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "am_start": "Morning websocket start (HH:MM)",
+          "am_end": "Morning websocket end (HH:MM)",
+          "pm_start": "Afternoon websocket start (HH:MM)",
+          "pm_end": "Afternoon websocket end (HH:MM)"
+        }
+      }
+    },
+    "error": {
+      "auth_failed": "Authentication failed",
+      "am_window_invalid": "Morning window must be <= 2 hours and end after start",
+      "pm_window_invalid": "Afternoon window must be <= 2 hours and end after start"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "FirstView Options",
+        "description": "Update morning/afternoon websocket windows.",
+        "data": {
+          "am_start": "Morning websocket start (HH:MM)",
+          "am_end": "Morning websocket end (HH:MM)",
+          "pm_start": "Afternoon websocket start (HH:MM)",
+          "pm_end": "Afternoon websocket end (HH:MM)"
+        }
+      }
+    },
+    "error": {
+      "am_window_invalid": "Morning window must be <= 2 hours and end after start",
+      "pm_window_invalid": "Afternoon window must be <= 2 hours and end after start"
+    }
+  }
+}
