@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import FirstViewCoordinator
@@ -93,7 +96,24 @@ class FirstViewWsStatusSensor(CoordinatorEntity[FirstViewCoordinator], SensorEnt
     def extra_state_attributes(self):
         last = (self.coordinator.data or {}).get("last_ws_event")
         data = self.coordinator.data or {}
+        ws_diag = data.get("ws_diagnostics", {})
+        last_age = _age_seconds(ws_diag.get("last_message_at"))
         return {
             "last_event_type": last.get("type") if isinstance(last, dict) else None,
             "socket_enabled": data.get("socket_enabled", True),
+            "last_event_age_seconds": last_age,
+            "ws_reconnect_count": ws_diag.get("reconnect_count"),
+            "ws_last_lag_seconds": ws_diag.get("last_lag_seconds"),
+            "ws_last_error": ws_diag.get("last_error"),
+            "ws_last_reconnect_at": ws_diag.get("last_reconnect_at"),
         }
+
+
+def _age_seconds(iso: str | None) -> float | None:
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    return max(0.0, (dt_util.utcnow().replace(tzinfo=dt.tzinfo) - dt).total_seconds())

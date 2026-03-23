@@ -19,8 +19,11 @@ from .const import (
     CONF_DAY_SU,
     CONF_DAY_T,
     CONF_DAY_W,
+    CONF_DAILY_INTERVAL_HOURS,
     CONF_EMAIL,
     CONF_PASSWORD,
+    CONF_PRESET,
+    CONF_HOURLY_INTERVAL_MINUTES,
     CONF_PM_ENABLED,
     CONF_PM_END,
     CONF_PM_START,
@@ -34,6 +37,9 @@ from .const import (
     DEFAULT_DAY_SU,
     DEFAULT_DAY_T,
     DEFAULT_DAY_W,
+    DEFAULT_DAILY_INTERVAL_HOURS,
+    DEFAULT_PRESET,
+    DEFAULT_HOURLY_INTERVAL_MINUTES,
     DEFAULT_PM_ENABLED,
     DEFAULT_PM_END,
     DEFAULT_PM_START,
@@ -41,7 +47,7 @@ from .const import (
 )
 from .coordinator import FirstViewConfig, FirstViewCoordinator, _parse_hhmm
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.DEVICE_TRACKER, Platform.BUTTON]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.DEVICE_TRACKER, Platform.BUTTON, Platform.SELECT]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -63,6 +69,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_DAY_F: merged.get(CONF_DAY_F, DEFAULT_DAY_F),
         CONF_DAY_SA: merged.get(CONF_DAY_SA, DEFAULT_DAY_SA),
         CONF_DAY_SU: merged.get(CONF_DAY_SU, DEFAULT_DAY_SU),
+        CONF_PRESET: merged.get(CONF_PRESET, DEFAULT_PRESET),
+        CONF_DAILY_INTERVAL_HOURS: merged.get(
+            CONF_DAILY_INTERVAL_HOURS, DEFAULT_DAILY_INTERVAL_HOURS
+        ),
+        CONF_HOURLY_INTERVAL_MINUTES: merged.get(
+            CONF_HOURLY_INTERVAL_MINUTES, DEFAULT_HOURLY_INTERVAL_MINUTES
+        ),
     }
     session = async_get_clientsession(hass)
     client = FirstViewClient(
@@ -85,6 +98,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         day_f=bool(data[CONF_DAY_F]),
         day_sa=bool(data[CONF_DAY_SA]),
         day_su=bool(data[CONF_DAY_SU]),
+        daily_interval_hours=int(data[CONF_DAILY_INTERVAL_HOURS]),
+        hourly_interval_minutes=int(data[CONF_HOURLY_INTERVAL_MINUTES]),
     )
     coordinator = FirstViewCoordinator(hass, client, cfg)
     await coordinator.async_config_entry_first_refresh()

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timezone
+import logging
+import random
 from typing import Any
 from urllib.parse import urlencode
 
@@ -16,7 +19,16 @@ from .const import (
     COGNITO_USER_POOL_ID,
     DASHBOARD_BASE,
     WS_BASE,
+    AUTH_BACKOFF_BASE_SECONDS,
+    AUTH_BACKOFF_MAX_SECONDS,
+    AUTH_RETRIES,
 )
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class FirstViewAuthError(RuntimeError):
+    """Raised when token acquisition fails after retries."""
 
 
 class FirstViewClient:
@@ -38,14 +50,41 @@ class FirstViewClient:
                 return self._access_token
 
         if self._refresh_token:
-            refreshed = await self._hass.async_add_executor_job(self._refresh_tokens_sync)
+            refreshed = await self._retry_auth_job(self._refresh_tokens_sync, "refresh")
             if refreshed:
                 return self._access_token or ""
 
-        await self._hass.async_add_executor_job(self._login_sync)
+        await self._retry_auth_job(self._login_sync, "login")
         if not self._access_token:
-            raise RuntimeError("Failed to obtain access token")
+            raise FirstViewAuthError("Failed to obtain access token")
         return self._access_token
+
+    async def _retry_auth_job(self, fn, label: str):
+        last_err: Exception | None = None
+        for attempt in range(1, AUTH_RETRIES + 1):
+            try:
+                result = await self._hass.async_add_executor_job(fn)
+                if result is False:
+                    raise FirstViewAuthError(f"{label} returned unsuccessful result")
+                return result
+            except Exception as err:  # broad by design to cover pycognito+boto auth failures
+                last_err = err
+                if attempt >= AUTH_RETRIES:
+                    break
+                delay = min(
+                    AUTH_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)) + random.uniform(0, 0.7),
+                    AUTH_BACKOFF_MAX_SECONDS,
+                )
+                _LOGGER.warning(
+                    "FirstView %s attempt %s/%s failed, retrying in %.1fs: %s",
+                    label,
+                    attempt,
+                    AUTH_RETRIES,
+                    delay,
+                    err,
+                )
+                await asyncio.sleep(delay)
+        raise FirstViewAuthError(f"Failed to {label}: {last_err}")
 
     def _base_cognito(self) -> Cognito:
         return Cognito(
@@ -137,6 +176,22 @@ class FirstViewClient:
 
     async def async_get_notifications_counter(self) -> dict[str, Any]:
         return await self.async_request("GET", "/api/v1/notifications/counter")
+
+    async def async_mark_all_notifications_read(self) -> Any:
+        return await self.async_request("PATCH", "/api/v1/notifications/mark-all-as-read")
+
+    async def async_set_notification_status(self, notification_id: str, status: str) -> Any:
+        return await self.async_request(
+            "PATCH",
+            f"/api/v1/notifications/{notification_id}",
+            params={"status": status},
+        )
+
+    async def async_delete_notification(self, notification_id: str) -> Any:
+        return await self.async_request("DELETE", f"/api/v1/notifications/{notification_id}")
+
+    async def async_delete_all_notifications(self) -> Any:
+        return await self.async_request("DELETE", "/api/v1/notifications")
 
     async def async_get_recent_location(self, vehicle_ids: list[str]) -> list[dict[str, Any]]:
         if not vehicle_ids:
