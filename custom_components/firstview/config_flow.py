@@ -115,7 +115,9 @@ class FirstViewConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     def async_get_options_flow(config_entry):
-        return FirstViewOptionsFlow(config_entry)
+        # HA injects config_entry on the flow; do not assign it in __init__
+        # (read-only property since HA 2025.12 — causes options 500 otherwise).
+        return FirstViewOptionsFlow()
 
     async def async_step_user(self, user_input=None):
         errors: dict[str, str] = {}
@@ -203,9 +205,6 @@ class FirstViewConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class FirstViewOptionsFlow(config_entries.OptionsFlow):
     """Options flow for window updates."""
-
-    def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
         errors: dict[str, str] = {}
