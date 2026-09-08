@@ -31,6 +31,8 @@ async def async_setup_entry(
         students = data.get("students", [])
         recent = data.get("recent_location", [])
         vehicle_map = data.get("vehicle_location_map", {})
+        known_vehicle_ids = data.get("known_vehicle_ids", [])
+        vehicle_meta = data.get("vehicle_meta", {})
         new_entities = []
         for student in students:
             sid = student.get("id")
@@ -41,15 +43,28 @@ async def async_setup_entry(
                 continue
             known_students.add(sid_str)
             new_entities.append(FirstViewStudentTracker(coordinator, entry.entry_id, student))
+
+        candidate_vids: set[str] = set()
+        for vid in known_vehicle_ids:
+            if isinstance(vid, str) and vid:
+                candidate_vids.add(vid)
+        for vid in vehicle_meta:
+            if isinstance(vid, str) and vid:
+                candidate_vids.add(vid)
         for event in recent:
             vid = event.get("vehicleId")
-            if isinstance(vid, str) and vid and vid not in known_buses:
-                known_buses.add(vid)
-                new_entities.append(FirstViewBusTracker(coordinator, entry.entry_id, vid))
+            if isinstance(vid, str) and vid:
+                candidate_vids.add(vid)
         for vid in vehicle_map:
-            if isinstance(vid, str) and vid and vid not in known_buses:
-                known_buses.add(vid)
-                new_entities.append(FirstViewBusTracker(coordinator, entry.entry_id, vid))
+            if isinstance(vid, str) and vid:
+                candidate_vids.add(vid)
+
+        for vid in sorted(candidate_vids):
+            if vid in known_buses:
+                continue
+            known_buses.add(vid)
+            new_entities.append(FirstViewBusTracker(coordinator, entry.entry_id, vid))
+
         if new_entities:
             async_add_entities(new_entities)
 
@@ -61,6 +76,7 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
     """Tracker entity per student that follows mapped vehicle location."""
 
     _attr_has_entity_name = True
+    _attr_name = None
     _attr_source_type = SourceType.GPS
 
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, student: dict[str, Any]) -> None:
@@ -69,8 +85,8 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
         self._student = student
         self._sid = str(student.get("id"))
         self._attr_unique_id = f"{entry_id}_student_{self._sid}"
-        name = student.get("name") or f"Student {self._sid}"
-        self._attr_name = f"{name} Bus"
+        name = student.get("firstName") or student.get("name") or f"Student {self._sid}"
+        self._device_name = f"{name} Bus"
 
     def _vehicle_event(self) -> dict[str, Any] | None:
         data = self.coordinator.data or {}
@@ -88,20 +104,15 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
     def device_info(self) -> DeviceInfo:
         mapping: dict[str, str] = (self.coordinator.data or {}).get("student_vehicle_map", {})
         vehicle = mapping.get(self._sid)
-        if vehicle:
-            return DeviceInfo(
-                identifiers={(DOMAIN, f"{self._entry_id}_student_{self._sid}")},
-                name=self._attr_name,
-                manufacturer="FirstView",
-                model="Student Tracker",
-                via_device=(DOMAIN, f"{self._entry_id}_bus_{vehicle}"),
-            )
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry_id}_student_{self._sid}")},
-            name=self._attr_name,
+            name=self._device_name,
             manufacturer="FirstView",
             model="Student Tracker",
         )
+        if vehicle:
+            info["via_device"] = (DOMAIN, f"{self._entry_id}_bus_{vehicle}")
+        return info
 
     @property
     def latitude(self):
@@ -138,17 +149,21 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
 
 
 class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity):
-    """Tracker entity per active vehicle for map + diagnostics."""
+    """Tracker entity per known vehicle for map + diagnostics."""
 
     _attr_has_entity_name = True
+    _attr_name = None
     _attr_source_type = SourceType.GPS
+    _attr_force_update = True
 
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, vehicle_id: str) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._vehicle_id = vehicle_id
         self._attr_unique_id = f"{entry_id}_bus_{vehicle_id}"
-        self._attr_name = f"Bus {vehicle_id}"
+
+    def _meta(self) -> dict[str, Any]:
+        return (self.coordinator.data or {}).get("vehicle_meta", {}).get(self._vehicle_id, {})
 
     def _event(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
@@ -159,11 +174,16 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
 
     @property
     def device_info(self) -> DeviceInfo:
+        meta = self._meta()
+        name = meta.get("display_name") or f"Bus {self._vehicle_id}"
+        model_bits = [meta.get("vehicle_lp") or self._vehicle_id]
+        if meta.get("direction"):
+            model_bits.append(str(meta["direction"]))
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry_id}_bus_{self._vehicle_id}")},
-            name=f"Bus {self._vehicle_id}",
+            name=name,
             manufacturer="FirstView",
-            model="Vehicle Tracker",
+            model=" / ".join(model_bits),
         )
 
     @property
@@ -179,9 +199,16 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
         event = self._event()
         status = event.get("status") if isinstance(event.get("status"), dict) else {}
         ws_diag = (self.coordinator.data or {}).get("ws_diagnostics", {})
+        meta = self._meta()
         event_age = _event_age_seconds(event.get("eventTimestamp"))
         return {
             "vehicle_id": self._vehicle_id,
+            "vehicle_lp": meta.get("vehicle_lp"),
+            "route": meta.get("route"),
+            "trip_name": meta.get("trip_name"),
+            "direction": meta.get("direction"),
+            "trip_status": meta.get("status"),
+            "students": meta.get("student_names"),
             "event_timestamp": event.get("eventTimestamp"),
             "event_age_seconds": event_age,
             "event_type": event.get("eventType"),

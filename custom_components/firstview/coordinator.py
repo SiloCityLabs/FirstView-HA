@@ -103,17 +103,49 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _on_ws_event(self, payload: dict[str, Any]) -> None:
         self._last_ws_event = payload
         pld = payload.get("payload") if isinstance(payload, dict) else None
+        location_changed = False
         if isinstance(pld, dict):
             vid = pld.get("vehicleId")
             if isinstance(vid, str) and vid:
                 self._last_vehicle_location[vid] = pld
+                location_changed = True
         self.hass.bus.async_fire("firstview_live_event", {"payload": payload})
+        # Push into coordinator so device_trackers / map update immediately.
+        if location_changed and self.data is not None:
+            data = dict(self.data)
+            data["last_ws_event"] = self._last_ws_event
+            data["websocket_connected"] = self._ws.connected
+            data["ws_diagnostics"] = self._ws.diagnostics
+            data["vehicle_location_map"] = dict(self._last_vehicle_location)
+            # Keep recent_location in sync for sensors/entities that read that list.
+            recent = list(data.get("recent_location") or [])
+            by_vid = {
+                e.get("vehicleId"): i
+                for i, e in enumerate(recent)
+                if isinstance(e, dict) and isinstance(e.get("vehicleId"), str)
+            }
+            for vid, event in self._last_vehicle_location.items():
+                if vid in by_vid:
+                    recent[by_vid[vid]] = event
+                else:
+                    recent.append(event)
+                    by_vid[vid] = len(recent) - 1
+            data["recent_location"] = recent
+            data["known_vehicle_ids"] = sorted(
+                set(data.get("known_vehicle_ids") or []) | set(self._last_vehicle_location)
+            )
+            self.async_set_updated_data(data)
 
     def _subscriptions(self) -> tuple[list[int], list[str]]:
         trips = self.data.get("trips", []) if self.data else []
         recent = self.data.get("recent_location", []) if self.data else []
         progress = self.data.get("trips_progress", []) if self.data else []
-        return _collect_trip_ids(trips), _collect_vehicle_ids(trips, recent, progress)
+        known = self.data.get("known_vehicle_ids", []) if self.data else []
+        vehicle_ids = _collect_vehicle_ids(trips, recent, progress)
+        for vid in known or []:
+            if isinstance(vid, str) and vid and vid not in vehicle_ids:
+                vehicle_ids.append(vid)
+        return _collect_trip_ids(trips), sorted(set(vehicle_ids))
 
     async def _notify_auth_issue(self, message: str) -> None:
         persistent_notification.async_create(
@@ -155,10 +187,21 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not self._last_hourly or now - self._last_hourly >= timedelta(
                 minutes=self.cfg.hourly_interval_minutes
             ):
-                trip_ids, vehicle_ids = self._subscriptions()
+                trip_ids = _collect_trip_ids(data.get("trips", []))
+                vehicle_ids = _collect_vehicle_ids(
+                    data.get("trips", []),
+                    data.get("recent_location", []),
+                    data.get("trips_progress", []),
+                )
                 data["trips_progress"] = (
                     await self.client.async_get_trips_progress(trip_ids)
                 ).get("items", [])
+                # Progress can add vehicle IDs; recompute before recent-location.
+                vehicle_ids = _collect_vehicle_ids(
+                    data.get("trips", []),
+                    data.get("recent_location", []),
+                    data.get("trips_progress", []),
+                )
                 notifications = await self.client.async_get_notifications(skip=0, limit=50)
                 data["notifications"] = notifications.get(
                     "items", notifications if isinstance(notifications, list) else []
@@ -195,6 +238,14 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["student_vehicle_map"] = dict(self._last_student_vehicle_map)
         data["student_vehicle_confidence"] = dict(self._last_student_vehicle_confidence)
         data["vehicle_location_map"] = dict(self._last_vehicle_location)
+        vehicle_meta = _build_vehicle_meta(data.get("trips", []))
+        data["vehicle_meta"] = vehicle_meta
+        known_ids = set(vehicle_meta) | set(self._last_vehicle_location)
+        for event in data.get("recent_location") or []:
+            vid = event.get("vehicleId") if isinstance(event, dict) else None
+            if isinstance(vid, str) and vid:
+                known_ids.add(vid)
+        data["known_vehicle_ids"] = sorted(known_ids)
         notification_ids = [
             str(item.get("id"))
             for item in data.get("notifications", [])
@@ -253,6 +304,87 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_request_refresh()
 
 
+def _trip_students(trip: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect students from FirstView trip payloads.
+
+    Live API nests students under runs[].students; older captures also used
+    top-level followedStudents.
+    """
+    students: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for key in ("followedStudents", "students"):
+        for student in trip.get(key) or []:
+            if not isinstance(student, dict):
+                continue
+            sid = student.get("id")
+            sid_str = str(sid) if sid is not None else None
+            if sid_str and sid_str in seen:
+                continue
+            if sid_str:
+                seen.add(sid_str)
+            students.append(student)
+    for run in trip.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        for student in run.get("students") or []:
+            if not isinstance(student, dict):
+                continue
+            sid = student.get("id")
+            sid_str = str(sid) if sid is not None else None
+            if sid_str and sid_str in seen:
+                continue
+            if sid_str:
+                seen.add(sid_str)
+            students.append(student)
+    return students
+
+
+def _status_rank(status: Any) -> int:
+    s = str(status or "").upper()
+    if s == "LIVE":
+        return 3
+    if s == "UPCOMING":
+        return 2
+    if s == "COMPLETED":
+        return 1
+    return 0
+
+
+def _build_vehicle_meta(trips: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Map vehicle_id -> display metadata from today's trips."""
+    meta: dict[str, dict[str, Any]] = {}
+    for trip in trips:
+        vehicle = trip.get("vehicleId") or trip.get("originVehicleId")
+        if not isinstance(vehicle, str) or not vehicle:
+            continue
+        route = trip.get("name") or trip.get("routeCode") or vehicle
+        lp = trip.get("vehicleLp") or vehicle
+        students = _trip_students(trip)
+        student_names = [
+            (s.get("firstName") or s.get("name") or "").strip()
+            for s in students
+            if isinstance(s, dict)
+        ]
+        student_names = [n for n in student_names if n]
+        candidate = {
+            "vehicle_id": vehicle,
+            "vehicle_lp": lp,
+            "route": route,
+            "direction": trip.get("direction"),
+            "status": trip.get("status") or trip.get("rawStatus"),
+            "trip_id": trip.get("id"),
+            "trip_name": trip.get("name"),
+            "student_names": student_names,
+            "display_name": f"{route} ({lp})" if route and lp and route != lp else f"Bus {lp}",
+        }
+        existing = meta.get(vehicle)
+        if existing is None or _status_rank(candidate["status"]) >= _status_rank(
+            existing.get("status")
+        ):
+            meta[vehicle] = candidate
+    return meta
+
+
 def _build_student_vehicle_map(
     trips: list[dict[str, Any]], trips_progress: list[dict[str, Any]]
 ) -> tuple[dict[str, str], dict[str, str]]:
@@ -260,16 +392,24 @@ def _build_student_vehicle_map(
     out: dict[str, str] = {}
     confidence: dict[str, str] = {}
     trip_vehicle_map: dict[int, str] = {}
-    for trip in trips:
+    # Prefer LIVE trips over COMPLETED when assigning a student to a bus.
+    ranked_trips = sorted(trips, key=lambda t: _status_rank(t.get("status")), reverse=True)
+    for trip in ranked_trips:
         vehicle = trip.get("vehicleId") or trip.get("originVehicleId")
         trip_id = trip.get("id")
         if isinstance(trip_id, int) and isinstance(vehicle, str) and vehicle:
             trip_vehicle_map[trip_id] = vehicle
-        for f in trip.get("followedStudents", []) or []:
-            sid = f.get("id")
-            if sid is not None and isinstance(vehicle, str) and vehicle:
-                out[str(sid)] = vehicle
-                confidence[str(sid)] = "high"
+        if not isinstance(vehicle, str) or not vehicle:
+            continue
+        for student in _trip_students(trip):
+            sid = student.get("id")
+            if sid is None:
+                continue
+            sid_str = str(sid)
+            # First write wins because we sorted LIVE first.
+            if sid_str not in out:
+                out[sid_str] = vehicle
+                confidence[sid_str] = "high"
     for progress in trips_progress or []:
         tid = progress.get("tripId") or progress.get("id")
         if not isinstance(tid, int):
@@ -277,7 +417,7 @@ def _build_student_vehicle_map(
         vehicle = progress.get("vehicleId") or trip_vehicle_map.get(tid)
         if not isinstance(vehicle, str) or not vehicle:
             continue
-        students = progress.get("followedStudents", []) or []
+        students = progress.get("followedStudents", []) or progress.get("students", []) or []
         for student in students:
             sid = student.get("id")
             sid_str = str(sid) if sid is not None else None
