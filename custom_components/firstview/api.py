@@ -206,11 +206,36 @@ class FirstViewClient:
     async def async_get_trips_progress(self, trip_ids: list[int]) -> dict[str, Any]:
         if not trip_ids:
             return {"items": []}
-        return await self.async_request(
-            "GET",
-            "/api/v1/trips/progress",
-            params={"ids": ",".join(str(x) for x in trip_ids)},
-        )
+        # Batch first; FirstView 404s the whole request when any UPCOMING/unknown
+        # trip has no progress yet, so fall back to per-id on failure.
+        try:
+            return await self.async_request(
+                "GET",
+                "/api/v1/trips/progress",
+                params={"ids": ",".join(str(x) for x in trip_ids)},
+            )
+        except RuntimeError as err:
+            if "404" not in str(err):
+                raise
+            _LOGGER.debug("Batch trips/progress failed, retrying per id: %s", err)
+
+        items: list[dict[str, Any]] = []
+        for trip_id in trip_ids:
+            try:
+                data = await self.async_request(
+                    "GET",
+                    "/api/v1/trips/progress",
+                    params={"ids": str(trip_id)},
+                )
+            except RuntimeError as err:
+                if "404" in str(err):
+                    _LOGGER.debug("No progress yet for trip %s", trip_id)
+                    continue
+                raise
+            chunk = data.get("items", data if isinstance(data, list) else [])
+            if isinstance(chunk, list):
+                items.extend(chunk)
+        return {"items": items}
 
     async def async_ws_url(self) -> str:
         token = await self.async_ensure_token()

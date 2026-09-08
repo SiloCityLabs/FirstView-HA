@@ -161,13 +161,19 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         data = dict(self.data or self._last_good_data or {})
         now = dt_util.now()
+        live = self.in_live_window()
         try:
-            if (
+            # Refresh trip roster more often while buses are active so LIVE/vehicle
+            # changes (e.g. Luzellie PM bus coming online) show up quickly.
+            daily_due = (
                 not self._last_daily
-                or now - self._last_daily >= timedelta(hours=self.cfg.daily_interval_hours)
+                or now - self._last_daily
+                >= timedelta(hours=self.cfg.daily_interval_hours)
                 or not data.get("students")
                 or not data.get("trips")
-            ):
+                or (live and (self._last_daily is None or now - self._last_daily >= timedelta(minutes=5)))
+            )
+            if daily_due:
                 students_data = await self.client.async_get_students()
                 trips_data = await self.client.async_get_trips()
                 data["students"] = students_data.get(
@@ -177,42 +183,58 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "items", trips_data if isinstance(trips_data, list) else []
                 )
                 self._last_daily = now
-                # On first daily pull, populate trip progress immediately to avoid empty startup entities.
-                trip_ids = _collect_trip_ids(data["trips"])
-                if trip_ids and not data.get("trips_progress"):
+
+            hourly_due = not self._last_hourly or now - self._last_hourly >= timedelta(
+                minutes=self.cfg.hourly_interval_minutes
+            )
+            # Location must not wait on the "hourly" bucket — parked buses often
+            # stop emitting WS frames, and progress 404s used to block this path.
+            location_due = hourly_due or live or not data.get("recent_location")
+
+            trip_ids = _collect_trip_ids(data.get("trips", []))
+            vehicle_ids = _collect_vehicle_ids(
+                data.get("trips", []),
+                data.get("recent_location", []),
+                data.get("trips_progress", []),
+            )
+
+            if hourly_due or (live and not data.get("trips_progress")):
+                try:
                     data["trips_progress"] = (
                         await self.client.async_get_trips_progress(trip_ids)
                     ).get("items", [])
+                except Exception as err:
+                    _LOGGER.warning("FirstView trips/progress failed (continuing): %s", err)
+                vehicle_ids = _collect_vehicle_ids(
+                    data.get("trips", []),
+                    data.get("recent_location", []),
+                    data.get("trips_progress", []),
+                )
 
-            if not self._last_hourly or now - self._last_hourly >= timedelta(
-                minutes=self.cfg.hourly_interval_minutes
-            ):
-                trip_ids = _collect_trip_ids(data.get("trips", []))
-                vehicle_ids = _collect_vehicle_ids(
-                    data.get("trips", []),
-                    data.get("recent_location", []),
-                    data.get("trips_progress", []),
-                )
-                data["trips_progress"] = (
-                    await self.client.async_get_trips_progress(trip_ids)
-                ).get("items", [])
-                # Progress can add vehicle IDs; recompute before recent-location.
-                vehicle_ids = _collect_vehicle_ids(
-                    data.get("trips", []),
-                    data.get("recent_location", []),
-                    data.get("trips_progress", []),
-                )
-                notifications = await self.client.async_get_notifications(skip=0, limit=50)
-                data["notifications"] = notifications.get(
-                    "items", notifications if isinstance(notifications, list) else []
-                )
-                data["notifications_counter"] = await self.client.async_get_notifications_counter()
-                recent = await self.client.async_get_recent_location(vehicle_ids)
-                data["recent_location"] = recent
-                for event in recent:
-                    vid = event.get("vehicleId")
-                    if isinstance(vid, str) and vid:
-                        self._last_vehicle_location[vid] = event
+            if hourly_due:
+                try:
+                    notifications = await self.client.async_get_notifications(skip=0, limit=50)
+                    data["notifications"] = notifications.get(
+                        "items", notifications if isinstance(notifications, list) else []
+                    )
+                    data["notifications_counter"] = (
+                        await self.client.async_get_notifications_counter()
+                    )
+                except Exception as err:
+                    _LOGGER.warning("FirstView notifications failed (continuing): %s", err)
+
+            if location_due and vehicle_ids:
+                try:
+                    recent = await self.client.async_get_recent_location(vehicle_ids)
+                    data["recent_location"] = recent
+                    for event in recent:
+                        vid = event.get("vehicleId")
+                        if isinstance(vid, str) and vid:
+                            self._last_vehicle_location[vid] = event
+                except Exception as err:
+                    _LOGGER.warning("FirstView recent-location failed (continuing): %s", err)
+
+            if hourly_due:
                 self._last_hourly = now
             await self._clear_auth_issue()
         except FirstViewAuthError as err:

@@ -128,12 +128,12 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
     def extra_state_attributes(self):
         event = self._vehicle_event() or {}
         status = event.get("status") if isinstance(event.get("status"), dict) else {}
-        confidence_map: dict[str, str] = (self.coordinator.data or {}).get(
-            "student_vehicle_confidence", {}
-        )
+        data = self.coordinator.data or {}
+        mapping: dict[str, str] = data.get("student_vehicle_map", {})
+        confidence_map: dict[str, str] = data.get("student_vehicle_confidence", {})
         return {
             "student_id": self._sid,
-            "vehicle_id": event.get("vehicleId"),
+            "vehicle_id": event.get("vehicleId") or mapping.get(self._sid),
             "mapping_confidence": confidence_map.get(self._sid, "low"),
             "device_id": event.get("deviceId"),
             "location_id": event.get("locationId"),
