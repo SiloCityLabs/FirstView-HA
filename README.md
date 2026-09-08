@@ -52,29 +52,29 @@ Custom Home Assistant integration for FirstView monitoring.
 3. Add integration from **Settings -> Devices & Services -> Add Integration**.
 4. Search for `FirstView`.
 
-## Example: bus near-home notifications (Rodriguez household)
+## Example: bus near-home notifications
 
-Real setup used with this integration in Amherst, NY (Home Assistant map + notify). Alert on **buses/routes**, not students — Delilah and Genevieve share one bus, so kid-level trackers would double-notify.
+Alert on **buses/routes**, not student trackers. If two kids share a bus, per-student alerts would double-notify.
 
-| Route | Riders | Typical device name |
-|-------|--------|---------------------|
-| `AH-84` | Delilah, Genevieve | `AH-84 (PCUJ6246)` (vehicle ID changes day to day) |
-| `AH-91` | Luzellie | `AH-91 (PCUJ6413)` |
+| Route (example) | Notes |
+|-----------------|--------|
+| `RT-12` | One bus device; vehicle ID on the tracker changes day to day |
+| `RT-15` | Duplicate the automation below and swap the route string |
 
 Supporting pieces:
 
 - Passive zone `zone.bus_alert` at home, radius **610 m (~2000 ft)**, icon `mdi:bus-school` (passive so it does not affect person home/away)
-- Automations match FirstView `device_tracker` entities by the `route` attribute (`AH-84` / `AH-91`), so changing `vehicleId`s still work
-- 20-second debounce; skipped when `input_boolean.vacation_mode` is on
-- Notifies `notify.luis_phone` and `notify.pixel_9_pro`
+- Automations match FirstView `device_tracker` entities by the `route` attribute, so changing `vehicleId`s still work
+- 20-second debounce; optional gate on a vacation helper
+- Notify via your phone notify entities (`notify.send_message`)
 
-Example automation for route **AH-84** (duplicate and change `AH-84` → `AH-91` for Luzellie’s bus):
+Example automation for route **RT-12** (copy and change `RT-12` → your other route code for each bus):
 
 ```yaml
-alias: "FirstView: AH-84 bus near home"
-id: firstview_bus_ah84_near_home
+alias: "FirstView: RT-12 bus near home"
+id: firstview_bus_rt12_near_home
 description: >
-  Notify when FirstView route AH-84 bus is within 2000 ft of home.
+  Notify when FirstView route RT-12 bus is within 2000 ft of home.
   Matches by route so vehicle ID changes still work; one alert per bus (not per kid).
 mode: single
 max_exceeded: silent
@@ -87,7 +87,7 @@ triggers:
       {% set thresh_km = 2000 / 3280.84 %}
       {% set ns = namespace(near=false) %}
       {% for s in states.device_tracker
-            if state_attr(s.entity_id, 'route') == 'AH-84'
+            if state_attr(s.entity_id, 'route') == 'RT-12'
             and state_attr(s.entity_id, 'latitude') is not none %}
         {% set d = distance(s.entity_id, 'zone.home') %}
         {% if d is not none and d <= thresh_km %}
@@ -103,19 +103,18 @@ actions:
   - action: notify.send_message
     target:
       entity_id:
-        - notify.luis_phone
-        - notify.pixel_9_pro
+        - notify.your_phone
     data:
-      title: "School bus nearby (AH-84)"
+      title: "School bus nearby (RT-12)"
       message: >
         {% set thresh_km = 2000 / 3280.84 %}
-        {% set ns = namespace(name='Bus AH-84', students='') %}
+        {% set ns = namespace(name='Bus RT-12', students='') %}
         {% for s in states.device_tracker
-              if state_attr(s.entity_id, 'route') == 'AH-84'
+              if state_attr(s.entity_id, 'route') == 'RT-12'
               and state_attr(s.entity_id, 'latitude') is not none %}
           {% set d = distance(s.entity_id, 'zone.home') %}
           {% if d is not none and d <= thresh_km %}
-            {% set ns.name = state_attr(s.entity_id, 'friendly_name') or 'Bus AH-84' %}
+            {% set ns.name = state_attr(s.entity_id, 'friendly_name') or 'Bus RT-12' %}
             {% set kids = state_attr(s.entity_id, 'students') %}
             {% if kids %}{% set ns.students = kids | join(', ') %}{% endif %}
           {% endif %}
@@ -123,7 +122,7 @@ actions:
         {{ ns.name }}{% if ns.students %} ({{ ns.students }}){% endif %} is within 2000 ft of home.
 ```
 
-Suggested websocket windows for three staggered routes (max 4 hours each): e.g. AM `06:00`–`10:00`, PM `13:00`–`17:00`.
+Suggested websocket windows when several routes are staggered (max 4 hours each): e.g. AM `06:00`–`10:00`, PM `13:00`–`17:00`.
 
 ## Notes
 
