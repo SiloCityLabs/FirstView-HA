@@ -44,7 +44,7 @@ DEFAULT_SHOW_BUS_TRACKERS = True
 
 BUS_MAP_ICON = "mdi:bus-school"
 # Map markers ignore mdi icons; they need entity_picture (image URL).
-BUS_MAP_ENTITY_PICTURE = f"/{DOMAIN}_static/icon.png"
+BUS_MAP_ENTITY_PICTURE = f"/{DOMAIN}_static/bus.png"
 BUS_MAP_STATIC_URL = f"/{DOMAIN}_static"
 MAX_WINDOW_MINUTES = 240
 MIN_DAILY_INTERVAL_HOURS = 6
