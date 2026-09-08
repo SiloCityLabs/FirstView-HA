@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    BUS_MAP_ENTITY_PICTURE,
     BUS_MAP_ICON,
     CONF_SHOW_BUS_TRACKERS,
     CONF_SHOW_STUDENT_TRACKERS,
@@ -129,6 +130,7 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
     _attr_has_entity_name = True
     _attr_name = None
     _attr_icon = BUS_MAP_ICON
+    _attr_entity_picture = BUS_MAP_ENTITY_PICTURE
     _attr_source_type = SourceType.GPS
 
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, student: dict[str, Any]) -> None:
@@ -206,6 +208,7 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
     _attr_has_entity_name = True
     _attr_name = None
     _attr_icon = BUS_MAP_ICON
+    _attr_entity_picture = BUS_MAP_ENTITY_PICTURE
     _attr_source_type = SourceType.GPS
     _attr_force_update = True
 

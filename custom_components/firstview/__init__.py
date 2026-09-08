@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -9,6 +12,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import FirstViewClient
 from .const import (
+    BUS_MAP_STATIC_URL,
     CONF_AM_ENABLED,
     CONF_AM_END,
     CONF_AM_START,
@@ -48,10 +52,31 @@ from .const import (
 from .coordinator import FirstViewConfig, FirstViewCoordinator, _parse_hhmm
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.DEVICE_TRACKER, Platform.BUTTON, Platform.SELECT]
+_STATIC_REGISTERED = f"{DOMAIN}_static_registered"
+_BRAND_DIR = Path(__file__).parent / "brand"
+
+
+async def _async_register_map_assets(hass: HomeAssistant) -> None:
+    """Serve brand/icon.png for device_tracker entity_picture on the Map."""
+    if hass.data.get(_STATIC_REGISTERED):
+        return
+    if not (_BRAND_DIR / "icon.png").is_file():
+        return
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                BUS_MAP_STATIC_URL,
+                str(_BRAND_DIR),
+                cache_headers=True,
+            )
+        ]
+    )
+    hass.data[_STATIC_REGISTERED] = True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up integration from config entry."""
+    await _async_register_map_assets(hass)
     merged = {**entry.data, **entry.options}
     data = {
         CONF_EMAIL: merged[CONF_EMAIL],
