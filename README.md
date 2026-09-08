@@ -2,6 +2,8 @@
 
 Custom Home Assistant integration for FirstView monitoring.
 
+![FirstView buses on the Home Assistant map](images/screenshot.png)
+
 ## Features
 
 - Config flow asks for:
