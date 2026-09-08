@@ -32,7 +32,7 @@ Custom Home Assistant integration for FirstView monitoring.
   - Device trackers per bus/vehicle for map view and diagnostics
   - Bus telemetry attributes on tracker (vehicle ID, device ID, heading, speed, odometer, ignition/motion/door)
   - Supports options flow to update AM/PM windows without re-adding integration
-  - Device-page button: **Toggle Websocket** (manual on/off override; still constrained by enabled days/windows and 2-hour window settings)
+  - Device-page button: **Toggle Websocket** (manual on/off override; still constrained by enabled days/windows and 4-hour window settings)
   - Action entities:
     - Mark all notifications read
     - Select notification ID + status (`READ`/`CREATED`) and apply
