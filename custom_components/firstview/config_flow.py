@@ -30,6 +30,8 @@ from .const import (
     CONF_PM_ENABLED,
     CONF_PM_END,
     CONF_PM_START,
+    CONF_SHOW_BUS_TRACKERS,
+    CONF_SHOW_STUDENT_TRACKERS,
     DEFAULT_AM_ENABLED,
     DEFAULT_AM_END,
     DEFAULT_AM_START,
@@ -46,6 +48,8 @@ from .const import (
     DEFAULT_PM_ENABLED,
     DEFAULT_PM_END,
     DEFAULT_PM_START,
+    DEFAULT_SHOW_BUS_TRACKERS,
+    DEFAULT_SHOW_STUDENT_TRACKERS,
     DOMAIN,
     MAX_DAILY_INTERVAL_HOURS,
     MAX_HOURLY_INTERVAL_MINUTES,
@@ -188,6 +192,10 @@ class FirstViewConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_DAY_F, default=DEFAULT_DAY_F): bool,
                 vol.Required(CONF_DAY_SA, default=DEFAULT_DAY_SA): bool,
                 vol.Required(CONF_DAY_SU, default=DEFAULT_DAY_SU): bool,
+                vol.Required(
+                    CONF_SHOW_STUDENT_TRACKERS, default=DEFAULT_SHOW_STUDENT_TRACKERS
+                ): bool,
+                vol.Required(CONF_SHOW_BUS_TRACKERS, default=DEFAULT_SHOW_BUS_TRACKERS): bool,
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
@@ -260,6 +268,14 @@ class FirstViewOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_DAY_F, default=current.get(CONF_DAY_F, DEFAULT_DAY_F)): bool,
                 vol.Required(CONF_DAY_SA, default=current.get(CONF_DAY_SA, DEFAULT_DAY_SA)): bool,
                 vol.Required(CONF_DAY_SU, default=current.get(CONF_DAY_SU, DEFAULT_DAY_SU)): bool,
+                vol.Required(
+                    CONF_SHOW_STUDENT_TRACKERS,
+                    default=current.get(CONF_SHOW_STUDENT_TRACKERS, DEFAULT_SHOW_STUDENT_TRACKERS),
+                ): bool,
+                vol.Required(
+                    CONF_SHOW_BUS_TRACKERS,
+                    default=current.get(CONF_SHOW_BUS_TRACKERS, DEFAULT_SHOW_BUS_TRACKERS),
+                ): bool,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

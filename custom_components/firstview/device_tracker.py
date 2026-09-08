@@ -9,13 +9,59 @@ from homeassistant.components.device_tracker import SourceType
 from homeassistant.components.device_tracker.config_entry import TrackerEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import (
+    BUS_MAP_ICON,
+    CONF_SHOW_BUS_TRACKERS,
+    CONF_SHOW_STUDENT_TRACKERS,
+    DEFAULT_SHOW_BUS_TRACKERS,
+    DEFAULT_SHOW_STUDENT_TRACKERS,
+    DOMAIN,
+)
 from .coordinator import FirstViewCoordinator
+
+
+def _tracker_options(entry: ConfigEntry) -> tuple[bool, bool]:
+    merged = {**entry.data, **entry.options}
+    return (
+        bool(merged.get(CONF_SHOW_STUDENT_TRACKERS, DEFAULT_SHOW_STUDENT_TRACKERS)),
+        bool(merged.get(CONF_SHOW_BUS_TRACKERS, DEFAULT_SHOW_BUS_TRACKERS)),
+    )
+
+
+def _sync_tracker_visibility(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Enable/disable trackers from options so the Map only shows what you want."""
+    show_students, show_buses = _tracker_options(entry)
+    registry = er.async_get(hass)
+    for ent in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if ent.domain != "device_tracker" or not ent.unique_id:
+            continue
+        uid = ent.unique_id
+        if "_student_" in uid:
+            enabled = show_students
+        elif "_bus_" in uid:
+            enabled = show_buses
+        else:
+            continue
+
+        updates: dict[str, Any] = {}
+        if ent.icon != BUS_MAP_ICON:
+            updates["icon"] = BUS_MAP_ICON
+
+        if enabled:
+            if ent.disabled_by == er.RegistryEntryDisabler.INTEGRATION:
+                updates["disabled_by"] = None
+        else:
+            if ent.disabled_by is None:
+                updates["disabled_by"] = er.RegistryEntryDisabler.INTEGRATION
+
+        if updates:
+            registry.async_update_entity(ent.entity_id, **updates)
 
 
 async def async_setup_entry(
@@ -24,9 +70,11 @@ async def async_setup_entry(
     coordinator: FirstViewCoordinator = hass.data[DOMAIN][entry.entry_id]
     known_students: set[str] = set()
     known_buses: set[str] = set()
+    _sync_tracker_visibility(hass, entry)
 
     @callback
     def add_missing() -> None:
+        show_students, show_buses = _tracker_options(entry)
         data = coordinator.data or {}
         students = data.get("students", [])
         recent = data.get("recent_location", [])
@@ -34,36 +82,39 @@ async def async_setup_entry(
         known_vehicle_ids = data.get("known_vehicle_ids", [])
         vehicle_meta = data.get("vehicle_meta", {})
         new_entities = []
-        for student in students:
-            sid = student.get("id")
-            if sid is None:
-                continue
-            sid_str = str(sid)
-            if sid_str in known_students:
-                continue
-            known_students.add(sid_str)
-            new_entities.append(FirstViewStudentTracker(coordinator, entry.entry_id, student))
 
-        candidate_vids: set[str] = set()
-        for vid in known_vehicle_ids:
-            if isinstance(vid, str) and vid:
-                candidate_vids.add(vid)
-        for vid in vehicle_meta:
-            if isinstance(vid, str) and vid:
-                candidate_vids.add(vid)
-        for event in recent:
-            vid = event.get("vehicleId")
-            if isinstance(vid, str) and vid:
-                candidate_vids.add(vid)
-        for vid in vehicle_map:
-            if isinstance(vid, str) and vid:
-                candidate_vids.add(vid)
+        if show_students:
+            for student in students:
+                sid = student.get("id")
+                if sid is None:
+                    continue
+                sid_str = str(sid)
+                if sid_str in known_students:
+                    continue
+                known_students.add(sid_str)
+                new_entities.append(FirstViewStudentTracker(coordinator, entry.entry_id, student))
 
-        for vid in sorted(candidate_vids):
-            if vid in known_buses:
-                continue
-            known_buses.add(vid)
-            new_entities.append(FirstViewBusTracker(coordinator, entry.entry_id, vid))
+        if show_buses:
+            candidate_vids: set[str] = set()
+            for vid in known_vehicle_ids:
+                if isinstance(vid, str) and vid:
+                    candidate_vids.add(vid)
+            for vid in vehicle_meta:
+                if isinstance(vid, str) and vid:
+                    candidate_vids.add(vid)
+            for event in recent:
+                vid = event.get("vehicleId")
+                if isinstance(vid, str) and vid:
+                    candidate_vids.add(vid)
+            for vid in vehicle_map:
+                if isinstance(vid, str) and vid:
+                    candidate_vids.add(vid)
+
+            for vid in sorted(candidate_vids):
+                if vid in known_buses:
+                    continue
+                known_buses.add(vid)
+                new_entities.append(FirstViewBusTracker(coordinator, entry.entry_id, vid))
 
         if new_entities:
             async_add_entities(new_entities)
@@ -77,6 +128,7 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
 
     _attr_has_entity_name = True
     _attr_name = None
+    _attr_icon = BUS_MAP_ICON
     _attr_source_type = SourceType.GPS
 
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, student: dict[str, Any]) -> None:
@@ -153,6 +205,7 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
 
     _attr_has_entity_name = True
     _attr_name = None
+    _attr_icon = BUS_MAP_ICON
     _attr_source_type = SourceType.GPS
     _attr_force_update = True
 

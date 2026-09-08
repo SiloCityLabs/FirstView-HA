@@ -22,7 +22,9 @@
           "day_r": "Thursday (R)",
           "day_f": "Friday (F)",
           "day_sa": "Saturday",
-          "day_su": "Sunday"
+          "day_su": "Sunday",
+          "show_student_trackers": "Show student trackers on the map",
+          "show_bus_trackers": "Show vehicle/bus trackers on the map"
         }
       }
     },
@@ -38,7 +40,7 @@
     "step": {
       "init": {
         "title": "FirstView Options",
-        "description": "Update morning/afternoon websocket windows.",
+        "description": "Update websocket windows and which trackers appear on the Map (bus icon: mdi:bus-school).",
         "data": {
           "preset": "Window preset",
           "am_enabled": "Enable morning bus websocket window",
@@ -55,7 +57,9 @@
           "day_r": "Thursday (R)",
           "day_f": "Friday (F)",
           "day_sa": "Saturday",
-          "day_su": "Sunday"
+          "day_su": "Sunday",
+          "show_student_trackers": "Show student trackers on the map",
+          "show_bus_trackers": "Show vehicle/bus trackers on the map"
         }
       }
     },

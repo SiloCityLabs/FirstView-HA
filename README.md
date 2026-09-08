@@ -28,8 +28,8 @@ Custom Home Assistant integration for FirstView monitoring.
   - Fires HA event `firstview_live_event` for automations
 - Entities:
   - Sensors for counts + websocket status
-  - Device trackers per student bus (best-effort student-to-vehicle mapping, with confidence attribute)
-  - Device trackers per bus/vehicle for map view and diagnostics
+  - Device trackers per student bus and per vehicle (all use `mdi:bus-school` on the Map)
+  - Options to show/hide student trackers and/or vehicle trackers on the Map (disabled entities are removed from `/map`)
   - Bus telemetry attributes on tracker (vehicle ID, device ID, heading, speed, odometer, ignition/motion/door)
   - Supports options flow to update AM/PM windows without re-adding integration
   - Device-page button: **Toggle Websocket** (manual on/off override; still constrained by enabled days/windows and 4-hour window settings)
