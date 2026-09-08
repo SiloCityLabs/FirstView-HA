@@ -15,7 +15,7 @@ Custom Home Assistant integration for FirstView monitoring.
   - Daily refresh interval (hours)
   - Frequent refresh interval (minutes)
   - Weekday checkboxes (`M T W R F Sat Sun`; `R` = Thursday)
-- Window validation enforces max 2 hours per window.
+- Window validation enforces max 4 hours per window.
 - Automatic monitoring:
   - Daily checks: students + trips
   - Hourly checks: trips progress, notifications, recent location

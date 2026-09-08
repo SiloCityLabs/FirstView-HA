@@ -28,8 +28,8 @@
     },
     "error": {
       "auth_failed": "Authentication failed",
-      "am_window_invalid": "Morning window must be <= 2 hours and end after start",
-      "pm_window_invalid": "Afternoon window must be <= 2 hours and end after start",
+      "am_window_invalid": "Morning window must be <= 4 hours and end after start",
+      "pm_window_invalid": "Afternoon window must be <= 4 hours and end after start",
       "no_days_selected": "Select at least one active weekday",
       "interval_invalid": "Polling interval values are outside allowed limits"
     }
@@ -60,8 +60,8 @@
       }
     },
     "error": {
-      "am_window_invalid": "Morning window must be <= 2 hours and end after start",
-      "pm_window_invalid": "Afternoon window must be <= 2 hours and end after start",
+      "am_window_invalid": "Morning window must be <= 4 hours and end after start",
+      "pm_window_invalid": "Afternoon window must be <= 4 hours and end after start",
       "no_days_selected": "Select at least one active weekday",
       "interval_invalid": "Polling interval values are outside allowed limits"
     }
