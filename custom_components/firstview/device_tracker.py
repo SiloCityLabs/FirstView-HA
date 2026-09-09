@@ -148,6 +148,9 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
         vehicle = mapping.get(self._sid)
         if not vehicle:
             return None
+        live_vids = set(data.get("live_vehicle_ids") or [])
+        if live_vids and vehicle not in live_vids:
+            return None
         for event in data.get("recent_location", []):
             if event.get("vehicleId") == vehicle:
                 return event
@@ -223,6 +226,15 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
 
     def _event(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
+        live_vids = set(data.get("live_vehicle_ids") or [])
+        # Hide UPCOMING/COMPLETED (and their stale GPS) from the Map.
+        if live_vids and self._vehicle_id not in live_vids:
+            return {}
+        meta = self._meta()
+        if str(meta.get("status") or "").upper() not in ("", "LIVE"):
+            # No meta yet → allow; explicit non-LIVE → hide.
+            if meta:
+                return {}
         for event in data.get("recent_location", []):
             if event.get("vehicleId") == self._vehicle_id:
                 return event

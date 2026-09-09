@@ -107,8 +107,11 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(pld, dict):
             vid = pld.get("vehicleId")
             if isinstance(vid, str) and vid:
-                self._last_vehicle_location[vid] = pld
-                location_changed = True
+                live_vids = set((self.data or {}).get("live_vehicle_ids") or [])
+                # Only cache GPS for LIVE vehicles; ignore ghost fixes for UPCOMING/COMPLETED.
+                if not live_vids or vid in live_vids:
+                    self._last_vehicle_location[vid] = pld
+                    location_changed = True
         self.hass.bus.async_fire("firstview_live_event", {"payload": payload})
         # Push into coordinator so device_trackers / map update immediately.
         if location_changed and self.data is not None:
@@ -262,6 +265,24 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["vehicle_location_map"] = dict(self._last_vehicle_location)
         vehicle_meta = _build_vehicle_meta(data.get("trips", []))
         data["vehicle_meta"] = vehicle_meta
+        live_vids = {
+            vid
+            for vid, meta in vehicle_meta.items()
+            if str(meta.get("status") or "").upper() == "LIVE"
+        }
+        data["live_vehicle_ids"] = sorted(live_vids)
+        # Drop cached GPS for vehicles that are not LIVE today (e.g. afternoon
+        # UPCOMING buses still holding yesterday's last fix).
+        for vid in list(self._last_vehicle_location):
+            if vid not in live_vids:
+                self._last_vehicle_location.pop(vid, None)
+        if isinstance(data.get("recent_location"), list):
+            data["recent_location"] = [
+                event
+                for event in data["recent_location"]
+                if isinstance(event, dict) and event.get("vehicleId") in live_vids
+            ]
+        data["vehicle_location_map"] = dict(self._last_vehicle_location)
         known_ids = set(vehicle_meta) | set(self._last_vehicle_location)
         for event in data.get("recent_location") or []:
             vid = event.get("vehicleId") if isinstance(event, dict) else None
