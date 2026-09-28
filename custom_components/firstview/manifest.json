@@ -5,7 +5,7 @@
     "@ldrrp"
   ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["http"],
   "documentation": "https://github.com/SiloCityLabs/FirstView-HA",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/SiloCityLabs/FirstView-HA/issues",
