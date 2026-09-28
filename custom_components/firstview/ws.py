@@ -29,12 +29,14 @@ class FirstViewWebsocketManager:
         in_window_cb: Callable[[], bool],
         get_subscriptions_cb: Callable[[], tuple[list[int], list[str]]],
         on_event_cb: Callable[[dict[str, Any]], None],
+        on_connected_cb: Callable[[], None] | None = None,
     ) -> None:
         self._session = session
         self._client = client
         self._in_window_cb = in_window_cb
         self._get_subscriptions_cb = get_subscriptions_cb
         self._on_event_cb = on_event_cb
+        self._on_connected_cb = on_connected_cb
         self._task: asyncio.Task | None = None
         self.connected = False
         self.reconnect_count = 0
@@ -78,6 +80,8 @@ class FirstViewWebsocketManager:
                     self.reconnect_count += 1
                     backoff = WS_BACKOFF_MIN_SECONDS
                     await self._subscribe(ws)
+                    if self._on_connected_cb:
+                        self._on_connected_cb()
                     await self._consume(ws)
             except asyncio.CancelledError:
                 raise

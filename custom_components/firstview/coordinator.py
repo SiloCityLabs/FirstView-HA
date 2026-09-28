@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .api import FirstViewAuthError, FirstViewClient
+from .const import WS_FRESH_LOCATION_SECONDS
 from .ws import FirstViewWebsocketManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,12 +66,15 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auth_notification_id = "firstview_auth_issue"
         self._selected_notification_id: str | None = None
         self._selected_notification_status: str = "READ"
+        self._last_forced_refresh: datetime | None = None
+        self._trip_progress: dict[int, dict[str, Any]] = {}
         self._ws = FirstViewWebsocketManager(
             client._session,  # intentional internal access inside integration package
             client,
             self.in_live_window,
             self._subscriptions,
             self._on_ws_event,
+            self._on_ws_connected,
         )
 
     async def async_start(self) -> None:
@@ -100,44 +104,84 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         pm_ok = self.cfg.pm_enabled and (self.cfg.pm_start <= now <= self.cfg.pm_end)
         return am_ok or pm_ok
 
+    def _on_ws_connected(self) -> None:
+        """Refresh trip status as soon as the morning/afternoon window opens."""
+        self._request_trip_refresh()
+
+    def _request_trip_refresh(self) -> None:
+        now = dt_util.utcnow()
+        if self._last_forced_refresh and now - self._last_forced_refresh < timedelta(seconds=45):
+            return
+        self._last_forced_refresh = now
+        self.hass.async_create_task(self._async_request_refresh_safe())
+
+    async def _async_request_refresh_safe(self) -> None:
+        try:
+            await self.async_request_refresh()
+        except Exception as err:
+            _LOGGER.debug("FirstView trip refresh skipped: %s", err)
+
+    def _publish_without_reschedule(self, data: dict[str, Any]) -> None:
+        """Push live GPS without postponing the REST poll.
+
+        ``async_set_updated_data`` restarts ``update_interval`` from now. Bus
+        pings arrive every few seconds, so that call kept the trip-status poll
+        from ever running during the route. The map then stayed empty until a
+        manual integration reload.
+        """
+        self.data = data
+        self._last_good_data = dict(data)
+        self.last_update_success = True
+        self.async_update_listeners()
+
     def _on_ws_event(self, payload: dict[str, Any]) -> None:
         self._last_ws_event = payload
         pld = payload.get("payload") if isinstance(payload, dict) else None
         location_changed = False
+        needs_status_refresh = False
+        progress_changed = False
+        if isinstance(pld, dict) and pld.get("eventType") == "TRIP_PROGRESS":
+            tid = pld.get("id") if isinstance(pld.get("id"), int) else pld.get("tripId")
+            if isinstance(tid, int):
+                progress_changed = self._note_progress(
+                    tid,
+                    _as_int(pld.get("totalStopsCount")),
+                    _as_int(pld.get("lastVisitedStop")),
+                )
         if isinstance(pld, dict):
             vid = pld.get("vehicleId")
-            if isinstance(vid, str) and vid:
-                live_vids = set((self.data or {}).get("live_vehicle_ids") or [])
-                # Only cache GPS for LIVE vehicles; ignore ghost fixes for UPCOMING/COMPLETED.
-                if not live_vids or vid in live_vids:
+            if isinstance(vid, str) and vid and pld.get("latitude") is not None:
+                data_now = self.data or {}
+                live_vids = set(data_now.get("live_vehicle_ids") or [])
+                meta = (data_now.get("vehicle_meta") or {}).get(vid) or {}
+                status = str(meta.get("status") or "").upper()
+                age = _location_age_seconds(pld.get("eventTimestamp"))
+                fresh = (
+                    status != "COMPLETED"
+                    and age is not None
+                    and age <= WS_FRESH_LOCATION_SECONDS
+                )
+                # Ignore stale replays for buses that are not LIVE yet.
+                if vid in live_vids or fresh:
                     self._last_vehicle_location[vid] = pld
                     location_changed = True
+                    if vid not in live_vids:
+                        needs_status_refresh = True
         self.hass.bus.async_fire("firstview_live_event", {"payload": payload})
-        # Push into coordinator so device_trackers / map update immediately.
-        if location_changed and self.data is not None:
+        if (location_changed or progress_changed) and self.data is not None:
             data = dict(self.data)
             data["last_ws_event"] = self._last_ws_event
             data["websocket_connected"] = self._ws.connected
             data["ws_diagnostics"] = self._ws.diagnostics
-            data["vehicle_location_map"] = dict(self._last_vehicle_location)
-            # Keep recent_location in sync for sensors/entities that read that list.
-            recent = list(data.get("recent_location") or [])
-            by_vid = {
-                e.get("vehicleId"): i
-                for i, e in enumerate(recent)
-                if isinstance(e, dict) and isinstance(e.get("vehicleId"), str)
-            }
-            for vid, event in self._last_vehicle_location.items():
-                if vid in by_vid:
-                    recent[by_vid[vid]] = event
-                else:
-                    recent.append(event)
-                    by_vid[vid] = len(recent) - 1
-            data["recent_location"] = recent
-            data["known_vehicle_ids"] = sorted(
-                set(data.get("known_vehicle_ids") or []) | set(self._last_vehicle_location)
-            )
-            self.async_set_updated_data(data)
+            if location_changed:
+                self._apply_map_visibility(data)
+                data["known_vehicle_ids"] = sorted(
+                    set(data.get("known_vehicle_ids") or []) | set(self._last_vehicle_location)
+                )
+            self._attach_stop_stats(data)
+            self._publish_without_reschedule(data)
+        if needs_status_refresh:
+            self._request_trip_refresh()
 
     def _subscriptions(self) -> tuple[list[int], list[str]]:
         trips = self.data.get("trips", []) if self.data else []
@@ -201,7 +245,9 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 data.get("trips_progress", []),
             )
 
-            if hourly_due or (live and not data.get("trips_progress")):
+            # During a live route, refresh progress every poll so stop counts
+            # recover even if a websocket TRIP_PROGRESS frame is missed.
+            if hourly_due or live:
                 try:
                     data["trips_progress"] = (
                         await self.client.async_get_trips_progress(trip_ids)
@@ -263,27 +309,8 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["student_vehicle_map"] = dict(self._last_student_vehicle_map)
         data["student_vehicle_confidence"] = dict(self._last_student_vehicle_confidence)
         data["vehicle_location_map"] = dict(self._last_vehicle_location)
-        vehicle_meta = _build_vehicle_meta(data.get("trips", []))
-        data["vehicle_meta"] = vehicle_meta
-        live_vids = {
-            vid
-            for vid, meta in vehicle_meta.items()
-            if str(meta.get("status") or "").upper() == "LIVE"
-        }
-        data["live_vehicle_ids"] = sorted(live_vids)
-        # Drop cached GPS for vehicles that are not LIVE today (e.g. afternoon
-        # UPCOMING buses still holding yesterday's last fix).
-        for vid in list(self._last_vehicle_location):
-            if vid not in live_vids:
-                self._last_vehicle_location.pop(vid, None)
-        if isinstance(data.get("recent_location"), list):
-            data["recent_location"] = [
-                event
-                for event in data["recent_location"]
-                if isinstance(event, dict) and event.get("vehicleId") in live_vids
-            ]
-        data["vehicle_location_map"] = dict(self._last_vehicle_location)
-        known_ids = set(vehicle_meta) | set(self._last_vehicle_location)
+        self._apply_map_visibility(data)
+        known_ids = set(data.get("vehicle_meta") or {}) | set(self._last_vehicle_location)
         for event in data.get("recent_location") or []:
             vid = event.get("vehicleId") if isinstance(event, dict) else None
             if isinstance(vid, str) and vid:
@@ -301,8 +328,92 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["notification_ids"] = notification_ids
         data["selected_notification_id"] = self._selected_notification_id
         data["selected_notification_status"] = self._selected_notification_status
+        self._attach_stop_stats(data)
         self._last_good_data = dict(data)
         return data
+
+    def _note_progress(self, trip_id: int, total: int | None, last: int | None) -> bool:
+        """Merge stop progress. Ignore a snapshot that moves the bus backwards."""
+        prev = self._trip_progress.get(trip_id, {})
+        entry = dict(prev)
+        changed = False
+        if isinstance(total, int) and total != prev.get("totalStopsCount"):
+            entry["totalStopsCount"] = total
+            changed = True
+        if isinstance(last, int):
+            prev_last = prev.get("lastVisitedStop")
+            if not isinstance(prev_last, int) or last > prev_last:
+                entry["lastVisitedStop"] = last
+                changed = True
+        if not changed:
+            return False
+        entry["tripId"] = trip_id
+        self._trip_progress[trip_id] = entry
+        return True
+
+    def _attach_stop_stats(self, data: dict[str, Any]) -> None:
+        trips = data.get("trips") or []
+        today = set(_collect_trip_ids(trips))
+        for item in data.get("trips_progress") or []:
+            if not isinstance(item, dict):
+                continue
+            tid = item.get("tripId") if isinstance(item.get("tripId"), int) else item.get("id")
+            if isinstance(tid, int):
+                self._note_progress(
+                    tid,
+                    _as_int(item.get("totalStopsCount")),
+                    _as_int(item.get("lastVisitedStop")),
+                )
+        if today:
+            self._trip_progress = {
+                tid: entry for tid, entry in self._trip_progress.items() if tid in today
+            }
+        data["trips_progress"] = [
+            {
+                "tripId": tid,
+                "totalStopsCount": entry.get("totalStopsCount"),
+                "lastVisitedStop": entry.get("lastVisitedStop"),
+            }
+            for tid, entry in sorted(self._trip_progress.items())
+        ]
+        data["student_stops"] = _build_student_stops(trips, self._trip_progress)
+        data["vehicle_stops"] = _build_vehicle_stops(data["student_stops"])
+
+    def _apply_map_visibility(self, data: dict[str, Any]) -> None:
+        """Keep LIVE buses, plus fresh fixes whose trip status has not flipped yet."""
+        vehicle_meta = _build_vehicle_meta(data.get("trips", []))
+        data["vehicle_meta"] = vehicle_meta
+        live_vids = {
+            vid
+            for vid, meta in vehicle_meta.items()
+            if str(meta.get("status") or "").upper() == "LIVE"
+        }
+        fresh = _fresh_vehicle_ids(self._last_vehicle_location, vehicle_meta)
+        for vid in list(self._last_vehicle_location):
+            if vid not in live_vids and vid not in fresh:
+                self._last_vehicle_location.pop(vid, None)
+        visible = live_vids | fresh
+        recent = [
+            event
+            for event in (data.get("recent_location") or [])
+            if isinstance(event, dict) and event.get("vehicleId") in visible
+        ]
+        by_vid = {
+            event.get("vehicleId"): index
+            for index, event in enumerate(recent)
+            if isinstance(event, dict)
+        }
+        for vid, event in self._last_vehicle_location.items():
+            if vid not in visible:
+                continue
+            if vid in by_vid:
+                recent[by_vid[vid]] = event
+            else:
+                recent.append(event)
+        data["recent_location"] = recent
+        data["vehicle_location_map"] = dict(self._last_vehicle_location)
+        data["live_vehicle_ids"] = sorted(live_vids)
+        data["ws_live_vehicle_ids"] = sorted(fresh - live_vids)
 
     async def async_set_socket_enabled(self, enabled: bool) -> None:
         """Enable/disable websocket regardless of schedule windows."""
@@ -472,18 +583,182 @@ def _build_student_vehicle_map(
 
 
 def _collect_trip_ids(trips: list[dict[str, Any]]) -> list[int]:
+    """Trip ids this account can query.
+
+    Run ``id`` values are stop-run records, not trips. Sending them to
+    ``/trips/progress`` makes FirstView 422 the whole batch with
+    "Permission denied for trips".
+    """
     ids: set[int] = set()
     for trip in trips:
-        for key in ("id", "tripId", "originTripId"):
-            val = trip.get(key)
-            if isinstance(val, int):
-                ids.add(val)
-        for run in trip.get("runs", []) or []:
-            for key in ("tripId", "originTripId", "id"):
-                val = run.get(key)
-                if isinstance(val, int):
-                    ids.add(val)
+        val = trip.get("id")
+        if isinstance(val, int):
+            ids.add(val)
     return sorted(ids)
+
+
+def _as_int(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
+def _stops_on_trip(trip: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    found: dict[int, dict[str, Any]] = {}
+    for run in trip.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        for stop in run.get("stops") or []:
+            if not isinstance(stop, dict):
+                continue
+            stop_id = _as_int(stop.get("id"))
+            if stop_id is not None:
+                found[stop_id] = stop
+    return found
+
+
+def _home_stop(trip: dict[str, Any], student: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """Stop at the student's house, and whether it is the pickup or dropoff."""
+    direction = str(trip.get("direction") or "").upper()
+    stops = _stops_on_trip(trip)
+    if direction == "PM":
+        target_id = _as_int(student.get("dropoffStopId")) or _as_int(student.get("pickupStopId"))
+        kind = "dropoff"
+    else:
+        target_id = _as_int(student.get("pickupStopId")) or _as_int(student.get("dropoffStopId"))
+        kind = "pickup"
+    preferred = stops.get(target_id) if target_id is not None else None
+    if preferred is not None and str(preferred.get("addressType") or "").upper() == "STUDENT":
+        return preferred, kind
+    for stop in stops.values():
+        if str(stop.get("addressType") or "").upper() == "STUDENT":
+            return stop, kind
+    return preferred, kind
+
+
+def _build_student_stops(
+    trips: list[dict[str, Any]], progress: dict[int, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """Per student: current stop, stops until the house, and route length.
+
+    Morning routes often drive past the house on the way to the first stop.
+    ``stops_left`` stays large until the bus is actually working toward pickup,
+    so a geofence alert can require ``stops_left <= 3``.
+    """
+    best: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
+    for trip in trips:
+        if not isinstance(trip, dict):
+            continue
+        tid = _as_int(trip.get("id"))
+        prog = progress.get(tid, {}) if tid is not None else {}
+        current = _as_int(prog.get("lastVisitedStop"))
+        total = _as_int(prog.get("totalStopsCount"))
+        status = trip.get("status")
+        direction = str(trip.get("direction") or "").upper()
+        for student in _trip_students(trip):
+            sid = student.get("id")
+            if sid is None:
+                continue
+            sid_str = str(sid)
+            stop, kind = _home_stop(trip, student)
+            order = _as_int(stop.get("order")) if stop else None
+            planned = (stop or {}).get("arrivalPlanned") or "9999"
+            # Higher trip status wins. Same status: the earlier house arrival.
+            candidate_key = (-_status_rank(status), str(planned))
+            prev = best.get(sid_str)
+            if prev is not None and candidate_key >= prev[0]:
+                continue
+            stops_left = order - current if isinstance(order, int) and isinstance(current, int) else None
+            name = (student.get("firstName") or student.get("name") or "").strip()
+            best[sid_str] = (
+                candidate_key,
+                {
+                    "student_id": sid_str,
+                    "student_name": name,
+                    "route": trip.get("name") or trip.get("routeCode"),
+                    "direction": direction or None,
+                    "trip_id": tid,
+                    "trip_status": status,
+                    "vehicle_id": trip.get("vehicleId"),
+                    "current_stop": current,
+                    "total_stops": total,
+                    "target_stop": order,
+                    "target_kind": kind,
+                    "stop_name": (stop or {}).get("addressName"),
+                    "stops_left": stops_left,
+                },
+            )
+    return {sid: payload for sid, (_, payload) in best.items()}
+
+
+def _build_vehicle_stops(student_stops: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Roll student stop counts up to the bus. ``stops_left`` is the soonest house stop."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for stat in student_stops.values():
+        vid = stat.get("vehicle_id")
+        if isinstance(vid, str) and vid:
+            grouped.setdefault(vid, []).append(stat)
+    out: dict[str, dict[str, Any]] = {}
+    for vid, stats in grouped.items():
+        lefts = [stat["stops_left"] for stat in stats if isinstance(stat.get("stops_left"), int)]
+        current = next(
+            (stat.get("current_stop") for stat in stats if isinstance(stat.get("current_stop"), int)),
+            None,
+        )
+        total = next(
+            (stat.get("total_stops") for stat in stats if isinstance(stat.get("total_stops"), int)),
+            None,
+        )
+        out[vid] = {
+            "current_stop": current,
+            "total_stops": total,
+            "stops_left": min(lefts) if lefts else None,
+            "target_stop": next(
+                (stat.get("target_stop") for stat in stats if isinstance(stat.get("target_stop"), int)),
+                None,
+            ),
+            "students": {
+                stat.get("student_name") or stat.get("student_id"): stat.get("stops_left")
+                for stat in stats
+            },
+        }
+    return out
+
+
+def _location_age_seconds(timestamp: str | None) -> float | None:
+    if not isinstance(timestamp, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    now = dt_util.utcnow()
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=now.tzinfo)
+    return max(0.0, (now - parsed).total_seconds())
+
+
+def _fresh_vehicle_ids(
+    locations: dict[str, dict[str, Any]], vehicle_meta: dict[str, dict[str, Any]]
+) -> set[str]:
+    """Vehicles with a recent fix whose trip is not already COMPLETED."""
+    fresh: set[str] = set()
+    for vid, event in locations.items():
+        if not isinstance(event, dict):
+            continue
+        if event.get("latitude") is None or event.get("longitude") is None:
+            continue
+        status = str((vehicle_meta.get(vid) or {}).get("status") or "").upper()
+        if status == "COMPLETED":
+            continue
+        age = _location_age_seconds(event.get("eventTimestamp"))
+        if age is not None and age <= WS_FRESH_LOCATION_SECONDS:
+            fresh.add(vid)
+    return fresh
 
 
 def _collect_vehicle_ids(

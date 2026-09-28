@@ -27,6 +27,20 @@ from .const import (
 from .coordinator import FirstViewCoordinator
 
 
+def _coords_visible(data: dict[str, Any], vehicle_id: str) -> bool:
+    """True when this bus should be drawn on the map."""
+    if vehicle_id in set(data.get("ws_live_vehicle_ids") or []):
+        return True
+    live_vids = set(data.get("live_vehicle_ids") or [])
+    if live_vids and vehicle_id not in live_vids:
+        return False
+    meta = (data.get("vehicle_meta") or {}).get(vehicle_id) or {}
+    status = str(meta.get("status") or "").upper()
+    if meta and status not in ("", "LIVE"):
+        return False
+    return True
+
+
 def _tracker_options(entry: ConfigEntry) -> tuple[bool, bool]:
     merged = {**entry.data, **entry.options}
     return (
@@ -148,8 +162,7 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
         vehicle = mapping.get(self._sid)
         if not vehicle:
             return None
-        live_vids = set(data.get("live_vehicle_ids") or [])
-        if live_vids and vehicle not in live_vids:
+        if not _coords_visible(data, vehicle):
             return None
         for event in data.get("recent_location", []):
             if event.get("vehicleId") == vehicle:
@@ -226,15 +239,10 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
 
     def _event(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
-        live_vids = set(data.get("live_vehicle_ids") or [])
-        # Hide UPCOMING/COMPLETED (and their stale GPS) from the Map.
-        if live_vids and self._vehicle_id not in live_vids:
+        # Hide UPCOMING/COMPLETED stale GPS. A fresh websocket fix is shown
+        # even when the trip roster still says UPCOMING.
+        if not _coords_visible(data, self._vehicle_id):
             return {}
-        meta = self._meta()
-        if str(meta.get("status") or "").upper() not in ("", "LIVE"):
-            # No meta yet → allow; explicit non-LIVE → hide.
-            if meta:
-                return {}
         for event in data.get("recent_location", []):
             if event.get("vehicleId") == self._vehicle_id:
                 return event
@@ -269,6 +277,8 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
         ws_diag = (self.coordinator.data or {}).get("ws_diagnostics", {})
         meta = self._meta()
         event_age = _event_age_seconds(event.get("eventTimestamp"))
+        stop_info = (self.coordinator.data or {}).get("vehicle_stops", {}).get(self._vehicle_id) or {}
+        stops_left = stop_info.get("stops_left")
         return {
             "vehicle_id": self._vehicle_id,
             "vehicle_lp": meta.get("vehicle_lp"),
@@ -277,6 +287,12 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
             "direction": meta.get("direction"),
             "trip_status": meta.get("status"),
             "students": meta.get("student_names"),
+            "current_stop": stop_info.get("current_stop"),
+            "stops_left": stops_left if isinstance(stops_left, int) else None,
+            "stops_left_known": isinstance(stops_left, int),
+            "total_stops": stop_info.get("total_stops"),
+            "target_stop": stop_info.get("target_stop"),
+            "student_stops_left": stop_info.get("students"),
             "event_timestamp": event.get("eventTimestamp"),
             "event_age_seconds": event_age,
             "event_type": event.get("eventType"),

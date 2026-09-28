@@ -65,6 +65,7 @@ Alert on **buses/routes**, not student trackers. If two kids share a bus, per-st
 
 Supporting pieces:
 
+- Each student has `current_stop`, `stops_left`, and `total_stops` sensors. `stops_left` is how many stops remain until that student's house (morning pickup or afternoon dropoff). The bus tracker's `stops_left` attribute is the soonest of those.
 - Passive zone `zone.bus_alert` at home, radius **610 m (~2000 ft)**, icon `mdi:bus-school` (passive so it does not affect person home/away)
 - Automations match FirstView `device_tracker` entities by the `route` attribute, so changing `vehicleId`s still work
 - 20-second debounce; optional gate on a vacation helper
@@ -92,8 +93,13 @@ triggers:
             if state_attr(s.entity_id, 'route') == 'RT-12'
             and state_attr(s.entity_id, 'latitude') is not none %}
         {% set d = distance(s.entity_id, 'zone.home') %}
+        {% set known = state_attr(s.entity_id, 'stops_left_known') %}
+        {% set left = state_attr(s.entity_id, 'stops_left') %}
         {% if d is not none and d <= thresh_km %}
-          {% set ns.near = true %}
+          {# Skip the morning deadhead past the house: alert only within 3 stops of pickup/dropoff. #}
+          {% if known is none or (known and left is number and left >= 0 and left <= 3) %}
+            {% set ns.near = true %}
+          {% endif %}
         {% endif %}
       {% endfor %}
       {{ ns.near }}

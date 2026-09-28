@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 
 from aiohttp import ClientSession
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from pycognito import Cognito
 
 from .const import (
@@ -164,7 +165,8 @@ class FirstViewClient:
         return await self.async_request("GET", "/api/v2/followed-students")
 
     async def async_get_trips(self, trip_date: date | None = None) -> dict[str, Any]:
-        d = (trip_date or date.today()).isoformat()
+        # HAOS runs in UTC; date.today() would request tomorrow's roster after 8 PM ET.
+        d = (trip_date or dt_util.now().date()).isoformat()
         return await self.async_request("GET", "/api/v3/student-trips", params={"date": d})
 
     async def async_get_notifications(self, skip: int = 0, limit: int = 50) -> dict[str, Any]:
@@ -206,8 +208,9 @@ class FirstViewClient:
     async def async_get_trips_progress(self, trip_ids: list[int]) -> dict[str, Any]:
         if not trip_ids:
             return {"items": []}
-        # Batch first; FirstView 404s the whole request when any UPCOMING/unknown
-        # trip has no progress yet, so fall back to per-id on failure.
+        # Batch first. FirstView 404s the whole request when any UPCOMING trip
+        # has no progress yet, and 422s the whole request if any id is not a
+        # trip this account can read. Fall back to per-id in both cases.
         try:
             return await self.async_request(
                 "GET",
@@ -215,7 +218,7 @@ class FirstViewClient:
                 params={"ids": ",".join(str(x) for x in trip_ids)},
             )
         except RuntimeError as err:
-            if "404" not in str(err):
+            if "404" not in str(err) and "422" not in str(err):
                 raise
             _LOGGER.debug("Batch trips/progress failed, retrying per id: %s", err)
 
@@ -228,8 +231,8 @@ class FirstViewClient:
                     params={"ids": str(trip_id)},
                 )
             except RuntimeError as err:
-                if "404" in str(err):
-                    _LOGGER.debug("No progress yet for trip %s", trip_id)
+                if "404" in str(err) or "422" in str(err):
+                    _LOGGER.debug("No progress for trip %s: %s", trip_id, err)
                     continue
                 raise
             chunk = data.get("items", data if isinstance(data, list) else [])
