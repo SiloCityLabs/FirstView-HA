@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
+from datetime import timedelta
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
@@ -34,7 +34,9 @@ async def async_setup_entry(
     )
 
 
-class FirstViewToggleSocketButton(CoordinatorEntity[FirstViewCoordinator], ButtonEntity):
+class FirstViewToggleSocketButton(
+    CoordinatorEntity[FirstViewCoordinator], ButtonEntity
+):
     """Toggle websocket on/off from device page."""
 
     _attr_has_entity_name = True
@@ -69,7 +71,9 @@ class FirstViewToggleSocketButton(CoordinatorEntity[FirstViewCoordinator], Butto
 class _FirstViewActionButton(CoordinatorEntity[FirstViewCoordinator], ButtonEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, unique: str, name: str) -> None:
+    def __init__(
+        self, coordinator: FirstViewCoordinator, entry_id: str, unique: str, name: str
+    ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._attr_unique_id = f"{entry_id}_{unique}"
@@ -87,7 +91,9 @@ class _FirstViewActionButton(CoordinatorEntity[FirstViewCoordinator], ButtonEnti
 
 class FirstViewMarkAllReadButton(_FirstViewActionButton):
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id, "mark_all_read", "Mark All Notifications Read")
+        super().__init__(
+            coordinator, entry_id, "mark_all_read", "Mark All Notifications Read"
+        )
 
     async def async_press(self) -> None:
         await self.coordinator.async_mark_all_notifications_read()
@@ -96,7 +102,10 @@ class FirstViewMarkAllReadButton(_FirstViewActionButton):
 class FirstViewApplyNotificationStatusButton(_FirstViewActionButton):
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str) -> None:
         super().__init__(
-            coordinator, entry_id, "apply_notification_status", "Apply Selected Notification Status"
+            coordinator,
+            entry_id,
+            "apply_notification_status",
+            "Apply Selected Notification Status",
         )
 
     async def async_press(self) -> None:
@@ -106,7 +115,10 @@ class FirstViewApplyNotificationStatusButton(_FirstViewActionButton):
 class FirstViewDeleteSelectedNotificationButton(_FirstViewActionButton):
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str) -> None:
         super().__init__(
-            coordinator, entry_id, "delete_selected_notification", "Delete Selected Notification"
+            coordinator,
+            entry_id,
+            "delete_selected_notification",
+            "Delete Selected Notification",
         )
         self._last_press: str | None = None
 
@@ -114,7 +126,9 @@ class FirstViewDeleteSelectedNotificationButton(_FirstViewActionButton):
         now = dt_util.utcnow()
         if self._last_press:
             previous = dt_util.parse_datetime(self._last_press)
-            if previous and now - previous <= timedelta(seconds=DELETE_CONFIRM_WINDOW_SECONDS):
+            if previous and now - previous <= timedelta(
+                seconds=DELETE_CONFIRM_WINDOW_SECONDS
+            ):
                 self._last_press = None
                 await self.coordinator.async_delete_selected_notification()
                 return
@@ -127,14 +141,21 @@ class FirstViewDeleteSelectedNotificationButton(_FirstViewActionButton):
 
 class FirstViewDeleteAllNotificationsButton(_FirstViewActionButton):
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id, "delete_all_notifications", "Delete All Notifications")
+        super().__init__(
+            coordinator,
+            entry_id,
+            "delete_all_notifications",
+            "Delete All Notifications",
+        )
         self._last_press: str | None = None
 
     async def async_press(self) -> None:
         now = dt_util.utcnow()
         if self._last_press:
             previous = dt_util.parse_datetime(self._last_press)
-            if previous and now - previous <= timedelta(seconds=DELETE_CONFIRM_WINDOW_SECONDS):
+            if previous and now - previous <= timedelta(
+                seconds=DELETE_CONFIRM_WINDOW_SECONDS
+            ):
                 self._last_press = None
                 await self.coordinator.async_delete_all_notifications()
                 return

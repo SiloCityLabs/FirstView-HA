@@ -23,13 +23,25 @@ async def async_setup_entry(
     coordinator: FirstViewCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
-            FirstViewMetricSensor(coordinator, entry.entry_id, "students_count", "Students", "students"),
-            FirstViewMetricSensor(coordinator, entry.entry_id, "trips_count", "Trips", "trips"),
             FirstViewMetricSensor(
-                coordinator, entry.entry_id, "notifications_count", "Notifications", "notifications"
+                coordinator, entry.entry_id, "students_count", "Students", "students"
             ),
             FirstViewMetricSensor(
-                coordinator, entry.entry_id, "recent_locations_count", "Recent Locations", "recent_location"
+                coordinator, entry.entry_id, "trips_count", "Trips", "trips"
+            ),
+            FirstViewMetricSensor(
+                coordinator,
+                entry.entry_id,
+                "notifications_count",
+                "Notifications",
+                "notifications",
+            ),
+            FirstViewMetricSensor(
+                coordinator,
+                entry.entry_id,
+                "recent_locations_count",
+                "Recent Locations",
+                "recent_location",
             ),
             FirstViewWsStatusSensor(coordinator, entry.entry_id),
         ]
@@ -44,7 +56,9 @@ async def async_setup_entry(
             if isinstance(student, dict) and student.get("id") is not None:
                 students_by_id[str(student["id"])] = student
         for sid, stats in (data.get("student_stops") or {}).items():
-            students_by_id.setdefault(sid, {"id": sid, "firstName": stats.get("student_name")})
+            students_by_id.setdefault(
+                sid, {"id": sid, "firstName": stats.get("student_name")}
+            )
         new_entities: list[SensorEntity] = []
         for sid, student in students_by_id.items():
             if sid in known_students:
@@ -52,7 +66,9 @@ async def async_setup_entry(
             known_students.add(sid)
             for metric in ("current_stop", "stops_left", "total_stops"):
                 new_entities.append(
-                    FirstViewStudentStopSensor(coordinator, entry.entry_id, student, metric)
+                    FirstViewStudentStopSensor(
+                        coordinator, entry.entry_id, student, metric
+                    )
                 )
         if new_entities:
             async_add_entities(new_entities)
@@ -66,7 +82,14 @@ class FirstViewMetricSensor(CoordinatorEntity[FirstViewCoordinator], SensorEntit
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, key: str, name: str, data_key: str) -> None:
+    def __init__(
+        self,
+        coordinator: FirstViewCoordinator,
+        entry_id: str,
+        key: str,
+        name: str,
+        data_key: str,
+    ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._data_key = data_key
@@ -88,7 +111,11 @@ class FirstViewMetricSensor(CoordinatorEntity[FirstViewCoordinator], SensorEntit
         value = data.get(self._data_key, [])
         if isinstance(value, list):
             return len(value)
-        if isinstance(value, dict) and "items" in value and isinstance(value["items"], list):
+        if (
+            isinstance(value, dict)
+            and "items" in value
+            and isinstance(value["items"], list)
+        ):
             return len(value["items"])
         return 0
 
@@ -163,11 +190,15 @@ class FirstViewStudentStopSensor(CoordinatorEntity[FirstViewCoordinator], Sensor
         self._attr_unique_id = f"{entry_id}_student_{self._sid}_{metric}"
         self._attr_name = name
         self._attr_icon = icon
-        label = student.get("firstName") or student.get("name") or f"Student {self._sid}"
+        label = (
+            student.get("firstName") or student.get("name") or f"Student {self._sid}"
+        )
         self._device_name = f"{label} Bus"
 
     def _stats(self) -> dict[str, Any]:
-        return ((self.coordinator.data or {}).get("student_stops") or {}).get(self._sid) or {}
+        return ((self.coordinator.data or {}).get("student_stops") or {}).get(
+            self._sid
+        ) or {}
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -187,7 +218,8 @@ class FirstViewStudentStopSensor(CoordinatorEntity[FirstViewCoordinator], Sensor
     def extra_state_attributes(self):
         stats = self._stats()
         return {
-            "student": stats.get("student_name") or self._device_name.removesuffix(" Bus"),
+            "student": stats.get("student_name")
+            or self._device_name.removesuffix(" Bus"),
             "route": stats.get("route"),
             "direction": stats.get("direction"),
             "target_stop": stats.get("target_stop"),
@@ -202,6 +234,6 @@ def _age_seconds(iso: str | None) -> float | None:
         return None
     try:
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-    except Exception:
+    except Exception:  # noqa: BLE001 - unparseable timestamps are treated as stale
         return None
     return max(0.0, (dt_util.utcnow().replace(tzinfo=dt.tzinfo) - dt).total_seconds())

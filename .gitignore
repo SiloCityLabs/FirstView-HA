@@ -8,3 +8,10 @@ venv/
 
 # Editor/system noise
 .DS_Store
+
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/

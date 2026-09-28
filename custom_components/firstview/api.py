@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
 import logging
 import random
+from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
@@ -15,14 +15,14 @@ from homeassistant.util import dt as dt_util
 from pycognito import Cognito
 
 from .const import (
+    AUTH_BACKOFF_BASE_SECONDS,
+    AUTH_BACKOFF_MAX_SECONDS,
+    AUTH_RETRIES,
     COGNITO_CLIENT_ID,
     COGNITO_REGION,
     COGNITO_USER_POOL_ID,
     DASHBOARD_BASE,
     WS_BASE,
-    AUTH_BACKOFF_BASE_SECONDS,
-    AUTH_BACKOFF_MAX_SECONDS,
-    AUTH_RETRIES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,7 +35,9 @@ class FirstViewAuthError(RuntimeError):
 class FirstViewClient:
     """Client for FirstView auth + REST + websocket URL generation."""
 
-    def __init__(self, hass: HomeAssistant, session: ClientSession, email: str, password: str) -> None:
+    def __init__(
+        self, hass: HomeAssistant, session: ClientSession, email: str, password: str
+    ) -> None:
         self._hass = hass
         self._session = session
         self._email = email
@@ -46,9 +48,12 @@ class FirstViewClient:
 
     async def async_ensure_token(self) -> str:
         """Ensure valid access token is available."""
-        if self._access_token and self._token_expiry:
-            if datetime.now(timezone.utc) < self._token_expiry:
-                return self._access_token
+        if (
+            self._access_token
+            and self._token_expiry
+            and datetime.now(timezone.utc) < self._token_expiry
+        ):
+            return self._access_token
 
         if self._refresh_token:
             refreshed = await self._retry_auth_job(self._refresh_tokens_sync, "refresh")
@@ -68,12 +73,13 @@ class FirstViewClient:
                 if result is False:
                     raise FirstViewAuthError(f"{label} returned unsuccessful result")
                 return result
-            except Exception as err:  # broad by design to cover pycognito+boto auth failures
+            except Exception as err:  # noqa: BLE001 - pycognito and boto raise mixed auth errors
                 last_err = err
                 if attempt >= AUTH_RETRIES:
                     break
                 delay = min(
-                    AUTH_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)) + random.uniform(0, 0.7),
+                    AUTH_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                    + random.uniform(0, 0.7),
                     AUTH_BACKOFF_MAX_SECONDS,
                 )
                 _LOGGER.warning(
@@ -106,7 +112,7 @@ class FirstViewClient:
         user = self._base_cognito()
         try:
             user.renew_access_token()
-        except Exception:
+        except Exception:  # noqa: BLE001 - token refresh failures fall back to login
             return False
         self._apply_tokens(user)
         return True
@@ -153,7 +159,9 @@ class FirstViewClient:
 
             if resp.status >= 400:
                 text = await resp.text()
-                raise RuntimeError(f"{method} {path} failed ({resp.status}): {text[:500]}")
+                raise RuntimeError(
+                    f"{method} {path} failed ({resp.status}): {text[:500]}"
+                )
 
             ctype = (resp.headers.get("content-type") or "").lower()
             if "application/json" in ctype:
@@ -167,9 +175,13 @@ class FirstViewClient:
     async def async_get_trips(self, trip_date: date | None = None) -> dict[str, Any]:
         # HAOS runs in UTC; date.today() would request tomorrow's roster after 8 PM ET.
         d = (trip_date or dt_util.now().date()).isoformat()
-        return await self.async_request("GET", "/api/v3/student-trips", params={"date": d})
+        return await self.async_request(
+            "GET", "/api/v3/student-trips", params={"date": d}
+        )
 
-    async def async_get_notifications(self, skip: int = 0, limit: int = 50) -> dict[str, Any]:
+    async def async_get_notifications(
+        self, skip: int = 0, limit: int = 50
+    ) -> dict[str, Any]:
         return await self.async_request(
             "GET",
             "/api/v1/notifications",
@@ -180,9 +192,13 @@ class FirstViewClient:
         return await self.async_request("GET", "/api/v1/notifications/counter")
 
     async def async_mark_all_notifications_read(self) -> Any:
-        return await self.async_request("PATCH", "/api/v1/notifications/mark-all-as-read")
+        return await self.async_request(
+            "PATCH", "/api/v1/notifications/mark-all-as-read"
+        )
 
-    async def async_set_notification_status(self, notification_id: str, status: str) -> Any:
+    async def async_set_notification_status(
+        self, notification_id: str, status: str
+    ) -> Any:
         return await self.async_request(
             "PATCH",
             f"/api/v1/notifications/{notification_id}",
@@ -190,12 +206,16 @@ class FirstViewClient:
         )
 
     async def async_delete_notification(self, notification_id: str) -> Any:
-        return await self.async_request("DELETE", f"/api/v1/notifications/{notification_id}")
+        return await self.async_request(
+            "DELETE", f"/api/v1/notifications/{notification_id}"
+        )
 
     async def async_delete_all_notifications(self) -> Any:
         return await self.async_request("DELETE", "/api/v1/notifications")
 
-    async def async_get_recent_location(self, vehicle_ids: list[str]) -> list[dict[str, Any]]:
+    async def async_get_recent_location(
+        self, vehicle_ids: list[str]
+    ) -> list[dict[str, Any]]:
         if not vehicle_ids:
             return []
         data = await self.async_request(

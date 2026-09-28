@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
-import logging
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -110,7 +110,9 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _request_trip_refresh(self) -> None:
         now = dt_util.utcnow()
-        if self._last_forced_refresh and now - self._last_forced_refresh < timedelta(seconds=45):
+        if self._last_forced_refresh and now - self._last_forced_refresh < timedelta(
+            seconds=45
+        ):
             return
         self._last_forced_refresh = now
         self.hass.async_create_task(self._async_request_refresh_safe())
@@ -118,7 +120,7 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_request_refresh_safe(self) -> None:
         try:
             await self.async_request_refresh()
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - keep last-good data on transient API errors
             _LOGGER.debug("FirstView trip refresh skipped: %s", err)
 
     def _publish_without_reschedule(self, data: dict[str, Any]) -> None:
@@ -176,7 +178,8 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if location_changed:
                 self._apply_map_visibility(data)
                 data["known_vehicle_ids"] = sorted(
-                    set(data.get("known_vehicle_ids") or []) | set(self._last_vehicle_location)
+                    set(data.get("known_vehicle_ids") or [])
+                    | set(self._last_vehicle_location)
                 )
             self._attach_stop_stats(data)
             self._publish_without_reschedule(data)
@@ -218,7 +221,13 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 >= timedelta(hours=self.cfg.daily_interval_hours)
                 or not data.get("students")
                 or not data.get("trips")
-                or (live and (self._last_daily is None or now - self._last_daily >= timedelta(minutes=5)))
+                or (
+                    live
+                    and (
+                        self._last_daily is None
+                        or now - self._last_daily >= timedelta(minutes=5)
+                    )
+                )
             )
             if daily_due:
                 students_data = await self.client.async_get_students()
@@ -252,8 +261,10 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     data["trips_progress"] = (
                         await self.client.async_get_trips_progress(trip_ids)
                     ).get("items", [])
-                except Exception as err:
-                    _LOGGER.warning("FirstView trips/progress failed (continuing): %s", err)
+                except Exception as err:  # noqa: BLE001 - keep last-good data on transient API errors
+                    _LOGGER.warning(
+                        "FirstView trips/progress failed (continuing): %s", err
+                    )
                 vehicle_ids = _collect_vehicle_ids(
                     data.get("trips", []),
                     data.get("recent_location", []),
@@ -262,15 +273,20 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             if hourly_due:
                 try:
-                    notifications = await self.client.async_get_notifications(skip=0, limit=50)
+                    notifications = await self.client.async_get_notifications(
+                        skip=0, limit=50
+                    )
                     data["notifications"] = notifications.get(
-                        "items", notifications if isinstance(notifications, list) else []
+                        "items",
+                        notifications if isinstance(notifications, list) else [],
                     )
-                    data["notifications_counter"] = (
-                        await self.client.async_get_notifications_counter()
+                    data[
+                        "notifications_counter"
+                    ] = await self.client.async_get_notifications_counter()
+                except Exception as err:  # noqa: BLE001 - keep last-good data on transient API errors
+                    _LOGGER.warning(
+                        "FirstView notifications failed (continuing): %s", err
                     )
-                except Exception as err:
-                    _LOGGER.warning("FirstView notifications failed (continuing): %s", err)
 
             if location_due and vehicle_ids:
                 try:
@@ -280,8 +296,10 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         vid = event.get("vehicleId")
                         if isinstance(vid, str) and vid:
                             self._last_vehicle_location[vid] = event
-                except Exception as err:
-                    _LOGGER.warning("FirstView recent-location failed (continuing): %s", err)
+                except Exception as err:  # noqa: BLE001 - keep last-good data on transient API errors
+                    _LOGGER.warning(
+                        "FirstView recent-location failed (continuing): %s", err
+                    )
 
             if hourly_due:
                 self._last_hourly = now
@@ -293,7 +311,7 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "last known data and will retry automatically."
             )
             data = dict(self._last_good_data or data)
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - keep last-good data on transient API errors
             _LOGGER.warning("FirstView transient update failure, using cache: %s", err)
             data = dict(self._last_good_data or data)
 
@@ -310,7 +328,9 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["student_vehicle_confidence"] = dict(self._last_student_vehicle_confidence)
         data["vehicle_location_map"] = dict(self._last_vehicle_location)
         self._apply_map_visibility(data)
-        known_ids = set(data.get("vehicle_meta") or {}) | set(self._last_vehicle_location)
+        known_ids = set(data.get("vehicle_meta") or {}) | set(
+            self._last_vehicle_location
+        )
         for event in data.get("recent_location") or []:
             vid = event.get("vehicleId") if isinstance(event, dict) else None
             if isinstance(vid, str) and vid:
@@ -323,8 +343,13 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ]
         if not self._selected_notification_id and notification_ids:
             self._selected_notification_id = notification_ids[0]
-        if self._selected_notification_id and self._selected_notification_id not in notification_ids:
-            self._selected_notification_id = notification_ids[0] if notification_ids else None
+        if (
+            self._selected_notification_id
+            and self._selected_notification_id not in notification_ids
+        ):
+            self._selected_notification_id = (
+                notification_ids[0] if notification_ids else None
+            )
         data["notification_ids"] = notification_ids
         data["selected_notification_id"] = self._selected_notification_id
         data["selected_notification_status"] = self._selected_notification_status
@@ -357,7 +382,11 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for item in data.get("trips_progress") or []:
             if not isinstance(item, dict):
                 continue
-            tid = item.get("tripId") if isinstance(item.get("tripId"), int) else item.get("id")
+            tid = (
+                item.get("tripId")
+                if isinstance(item.get("tripId"), int)
+                else item.get("id")
+            )
             if isinstance(tid, int):
                 self._note_progress(
                     tid,
@@ -422,12 +451,16 @@ class FirstViewCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._ws.stop()
         else:
             self._ws.start()
-        self.async_set_updated_data(dict(self.data or {}, socket_enabled=self._socket_manual_enabled))
+        self.async_set_updated_data(
+            dict(self.data or {}, socket_enabled=self._socket_manual_enabled)
+        )
 
     async def async_toggle_socket_enabled(self) -> None:
         await self.async_set_socket_enabled(not self._socket_manual_enabled)
 
-    async def async_set_selected_notification_id(self, notification_id: str | None) -> None:
+    async def async_set_selected_notification_id(
+        self, notification_id: str | None
+    ) -> None:
         self._selected_notification_id = notification_id
         self.async_set_updated_data(dict(self.data or {}))
 
@@ -529,7 +562,9 @@ def _build_vehicle_meta(trips: list[dict[str, Any]]) -> dict[str, dict[str, Any]
             "trip_id": trip.get("id"),
             "trip_name": trip.get("name"),
             "student_names": student_names,
-            "display_name": f"{route} ({lp})" if route and lp and route != lp else f"Bus {lp}",
+            "display_name": f"{route} ({lp})"
+            if route and lp and route != lp
+            else f"Bus {lp}",
         }
         existing = meta.get(vehicle)
         if existing is None or _status_rank(candidate["status"]) >= _status_rank(
@@ -547,7 +582,9 @@ def _build_student_vehicle_map(
     confidence: dict[str, str] = {}
     trip_vehicle_map: dict[int, str] = {}
     # Prefer LIVE trips over COMPLETED when assigning a student to a bus.
-    ranked_trips = sorted(trips, key=lambda t: _status_rank(t.get("status")), reverse=True)
+    ranked_trips = sorted(
+        trips, key=lambda t: _status_rank(t.get("status")), reverse=True
+    )
     for trip in ranked_trips:
         vehicle = trip.get("vehicleId") or trip.get("originVehicleId")
         trip_id = trip.get("id")
@@ -571,7 +608,9 @@ def _build_student_vehicle_map(
         vehicle = progress.get("vehicleId") or trip_vehicle_map.get(tid)
         if not isinstance(vehicle, str) or not vehicle:
             continue
-        students = progress.get("followedStudents", []) or progress.get("students", []) or []
+        students = (
+            progress.get("followedStudents", []) or progress.get("students", []) or []
+        )
         for student in students:
             sid = student.get("id")
             sid_str = str(sid) if sid is not None else None
@@ -621,18 +660,27 @@ def _stops_on_trip(trip: dict[str, Any]) -> dict[int, dict[str, Any]]:
     return found
 
 
-def _home_stop(trip: dict[str, Any], student: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+def _home_stop(
+    trip: dict[str, Any], student: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str]:
     """Stop at the student's house, and whether it is the pickup or dropoff."""
     direction = str(trip.get("direction") or "").upper()
     stops = _stops_on_trip(trip)
     if direction == "PM":
-        target_id = _as_int(student.get("dropoffStopId")) or _as_int(student.get("pickupStopId"))
+        target_id = _as_int(student.get("dropoffStopId")) or _as_int(
+            student.get("pickupStopId")
+        )
         kind = "dropoff"
     else:
-        target_id = _as_int(student.get("pickupStopId")) or _as_int(student.get("dropoffStopId"))
+        target_id = _as_int(student.get("pickupStopId")) or _as_int(
+            student.get("dropoffStopId")
+        )
         kind = "pickup"
     preferred = stops.get(target_id) if target_id is not None else None
-    if preferred is not None and str(preferred.get("addressType") or "").upper() == "STUDENT":
+    if (
+        preferred is not None
+        and str(preferred.get("addressType") or "").upper() == "STUDENT"
+    ):
         return preferred, kind
     for stop in stops.values():
         if str(stop.get("addressType") or "").upper() == "STUDENT":
@@ -672,7 +720,11 @@ def _build_student_stops(
             prev = best.get(sid_str)
             if prev is not None and candidate_key >= prev[0]:
                 continue
-            stops_left = order - current if isinstance(order, int) and isinstance(current, int) else None
+            stops_left = (
+                order - current
+                if isinstance(order, int) and isinstance(current, int)
+                else None
+            )
             name = (student.get("firstName") or student.get("name") or "").strip()
             best[sid_str] = (
                 candidate_key,
@@ -695,7 +747,9 @@ def _build_student_stops(
     return {sid: payload for sid, (_, payload) in best.items()}
 
 
-def _build_vehicle_stops(student_stops: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _build_vehicle_stops(
+    student_stops: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
     """Roll student stop counts up to the bus. ``stops_left`` is the soonest house stop."""
     grouped: dict[str, list[dict[str, Any]]] = {}
     for stat in student_stops.values():
@@ -704,13 +758,25 @@ def _build_vehicle_stops(student_stops: dict[str, dict[str, Any]]) -> dict[str, 
             grouped.setdefault(vid, []).append(stat)
     out: dict[str, dict[str, Any]] = {}
     for vid, stats in grouped.items():
-        lefts = [stat["stops_left"] for stat in stats if isinstance(stat.get("stops_left"), int)]
+        lefts = [
+            stat["stops_left"]
+            for stat in stats
+            if isinstance(stat.get("stops_left"), int)
+        ]
         current = next(
-            (stat.get("current_stop") for stat in stats if isinstance(stat.get("current_stop"), int)),
+            (
+                stat.get("current_stop")
+                for stat in stats
+                if isinstance(stat.get("current_stop"), int)
+            ),
             None,
         )
         total = next(
-            (stat.get("total_stops") for stat in stats if isinstance(stat.get("total_stops"), int)),
+            (
+                stat.get("total_stops")
+                for stat in stats
+                if isinstance(stat.get("total_stops"), int)
+            ),
             None,
         )
         out[vid] = {
@@ -718,11 +784,17 @@ def _build_vehicle_stops(student_stops: dict[str, dict[str, Any]]) -> dict[str, 
             "total_stops": total,
             "stops_left": min(lefts) if lefts else None,
             "target_stop": next(
-                (stat.get("target_stop") for stat in stats if isinstance(stat.get("target_stop"), int)),
+                (
+                    stat.get("target_stop")
+                    for stat in stats
+                    if isinstance(stat.get("target_stop"), int)
+                ),
                 None,
             ),
             "students": {
-                stat.get("student_name") or stat.get("student_id"): stat.get("stops_left")
+                stat.get("student_name") or stat.get("student_id"): stat.get(
+                    "stops_left"
+                )
                 for stat in stats
             },
         }
@@ -734,7 +806,7 @@ def _location_age_seconds(timestamp: str | None) -> float | None:
         return None
     try:
         parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-    except Exception:
+    except Exception:  # noqa: BLE001 - unparseable timestamps are treated as stale
         return None
     now = dt_util.utcnow()
     if parsed.tzinfo is None:

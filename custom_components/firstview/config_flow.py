@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import logging
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import FirstViewClient
 from .const import (
     CONF_AM_ENABLED,
     CONF_AM_END,
     CONF_AM_START,
+    CONF_DAILY_INTERVAL_HOURS,
     CONF_DAY_F,
     CONF_DAY_M,
     CONF_DAY_R,
@@ -23,18 +23,18 @@ from .const import (
     CONF_DAY_T,
     CONF_DAY_W,
     CONF_EMAIL,
-    CONF_PASSWORD,
-    CONF_PRESET,
-    CONF_DAILY_INTERVAL_HOURS,
     CONF_HOURLY_INTERVAL_MINUTES,
+    CONF_PASSWORD,
     CONF_PM_ENABLED,
     CONF_PM_END,
     CONF_PM_START,
+    CONF_PRESET,
     CONF_SHOW_BUS_TRACKERS,
     CONF_SHOW_STUDENT_TRACKERS,
     DEFAULT_AM_ENABLED,
     DEFAULT_AM_END,
     DEFAULT_AM_START,
+    DEFAULT_DAILY_INTERVAL_HOURS,
     DEFAULT_DAY_F,
     DEFAULT_DAY_M,
     DEFAULT_DAY_R,
@@ -42,12 +42,11 @@ from .const import (
     DEFAULT_DAY_SU,
     DEFAULT_DAY_T,
     DEFAULT_DAY_W,
-    DEFAULT_PRESET,
-    DEFAULT_DAILY_INTERVAL_HOURS,
     DEFAULT_HOURLY_INTERVAL_MINUTES,
     DEFAULT_PM_ENABLED,
     DEFAULT_PM_END,
     DEFAULT_PM_START,
+    DEFAULT_PRESET,
     DEFAULT_SHOW_BUS_TRACKERS,
     DEFAULT_SHOW_STUDENT_TRACKERS,
     DOMAIN,
@@ -64,8 +63,8 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _to_minutes(value: str) -> int:
-    t = datetime.strptime(value, "%H:%M")
-    return t.hour * 60 + t.minute
+    hour_s, minute_s, *_rest = value.split(":")
+    return int(hour_s) * 60 + int(minute_s)
 
 
 def _normalize_hhmm(value: str) -> str:
@@ -156,7 +155,7 @@ class FirstViewConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         password=user_input[CONF_PASSWORD],
                     )
                     await client.async_ensure_token()
-                except Exception as err:
+                except Exception as err:  # noqa: BLE001 - login failures abort the flow
                     _LOGGER.warning("FirstView login failed during setup: %s", err)
                     errors["base"] = "auth_failed"
                 else:
@@ -168,24 +167,44 @@ class FirstViewConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_EMAIL): str,
                 vol.Required(CONF_PASSWORD): str,
-                vol.Required(CONF_PRESET, default=DEFAULT_PRESET): selector.SelectSelector(
+                vol.Required(
+                    CONF_PRESET, default=DEFAULT_PRESET
+                ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[PRESET_CUSTOM, PRESET_SCHOOL_DEFAULT], mode=selector.SelectSelectorMode.DROPDOWN
+                        options=[PRESET_CUSTOM, PRESET_SCHOOL_DEFAULT],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
                 vol.Required(CONF_AM_ENABLED, default=DEFAULT_AM_ENABLED): bool,
-                vol.Required(CONF_AM_START, default=DEFAULT_AM_START): selector.TimeSelector(),
-                vol.Required(CONF_AM_END, default=DEFAULT_AM_END): selector.TimeSelector(),
+                vol.Required(
+                    CONF_AM_START, default=DEFAULT_AM_START
+                ): selector.TimeSelector(),
+                vol.Required(
+                    CONF_AM_END, default=DEFAULT_AM_END
+                ): selector.TimeSelector(),
                 vol.Required(CONF_PM_ENABLED, default=DEFAULT_PM_ENABLED): bool,
-                vol.Required(CONF_PM_START, default=DEFAULT_PM_START): selector.TimeSelector(),
-                vol.Required(CONF_PM_END, default=DEFAULT_PM_END): selector.TimeSelector(),
+                vol.Required(
+                    CONF_PM_START, default=DEFAULT_PM_START
+                ): selector.TimeSelector(),
+                vol.Required(
+                    CONF_PM_END, default=DEFAULT_PM_END
+                ): selector.TimeSelector(),
                 vol.Required(
                     CONF_DAILY_INTERVAL_HOURS, default=DEFAULT_DAILY_INTERVAL_HOURS
-                ): vol.All(vol.Coerce(int), vol.Range(min=MIN_DAILY_INTERVAL_HOURS, max=MAX_DAILY_INTERVAL_HOURS)),
-                vol.Required(
-                    CONF_HOURLY_INTERVAL_MINUTES, default=DEFAULT_HOURLY_INTERVAL_MINUTES
                 ): vol.All(
-                    vol.Coerce(int), vol.Range(min=MIN_HOURLY_INTERVAL_MINUTES, max=MAX_HOURLY_INTERVAL_MINUTES)
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=MIN_DAILY_INTERVAL_HOURS, max=MAX_DAILY_INTERVAL_HOURS
+                    ),
+                ),
+                vol.Required(
+                    CONF_HOURLY_INTERVAL_MINUTES,
+                    default=DEFAULT_HOURLY_INTERVAL_MINUTES,
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=MIN_HOURLY_INTERVAL_MINUTES, max=MAX_HOURLY_INTERVAL_MINUTES
+                    ),
                 ),
                 vol.Required(CONF_DAY_M, default=DEFAULT_DAY_M): bool,
                 vol.Required(CONF_DAY_T, default=DEFAULT_DAY_T): bool,
@@ -197,7 +216,9 @@ class FirstViewConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_SHOW_STUDENT_TRACKERS, default=DEFAULT_SHOW_STUDENT_TRACKERS
                 ): bool,
-                vol.Required(CONF_SHOW_BUS_TRACKERS, default=DEFAULT_SHOW_BUS_TRACKERS): bool,
+                vol.Required(
+                    CONF_SHOW_BUS_TRACKERS, default=DEFAULT_SHOW_BUS_TRACKERS
+                ): bool,
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
@@ -239,41 +260,88 @@ class FirstViewOptionsFlow(config_entries.OptionsFlow):
         current = {**self.config_entry.data, **self.config_entry.options}
         schema = vol.Schema(
             {
-                vol.Required(CONF_PRESET, default=current.get(CONF_PRESET, DEFAULT_PRESET)): selector.SelectSelector(
+                vol.Required(
+                    CONF_PRESET, default=current.get(CONF_PRESET, DEFAULT_PRESET)
+                ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[PRESET_CUSTOM, PRESET_SCHOOL_DEFAULT], mode=selector.SelectSelectorMode.DROPDOWN
+                        options=[PRESET_CUSTOM, PRESET_SCHOOL_DEFAULT],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
-                vol.Required(CONF_AM_ENABLED, default=current.get(CONF_AM_ENABLED, DEFAULT_AM_ENABLED)): bool,
-                vol.Required(CONF_AM_START, default=current.get(CONF_AM_START, DEFAULT_AM_START)): selector.TimeSelector(),
-                vol.Required(CONF_AM_END, default=current.get(CONF_AM_END, DEFAULT_AM_END)): selector.TimeSelector(),
-                vol.Required(CONF_PM_ENABLED, default=current.get(CONF_PM_ENABLED, DEFAULT_PM_ENABLED)): bool,
-                vol.Required(CONF_PM_START, default=current.get(CONF_PM_START, DEFAULT_PM_START)): selector.TimeSelector(),
-                vol.Required(CONF_PM_END, default=current.get(CONF_PM_END, DEFAULT_PM_END)): selector.TimeSelector(),
+                vol.Required(
+                    CONF_AM_ENABLED,
+                    default=current.get(CONF_AM_ENABLED, DEFAULT_AM_ENABLED),
+                ): bool,
+                vol.Required(
+                    CONF_AM_START, default=current.get(CONF_AM_START, DEFAULT_AM_START)
+                ): selector.TimeSelector(),
+                vol.Required(
+                    CONF_AM_END, default=current.get(CONF_AM_END, DEFAULT_AM_END)
+                ): selector.TimeSelector(),
+                vol.Required(
+                    CONF_PM_ENABLED,
+                    default=current.get(CONF_PM_ENABLED, DEFAULT_PM_ENABLED),
+                ): bool,
+                vol.Required(
+                    CONF_PM_START, default=current.get(CONF_PM_START, DEFAULT_PM_START)
+                ): selector.TimeSelector(),
+                vol.Required(
+                    CONF_PM_END, default=current.get(CONF_PM_END, DEFAULT_PM_END)
+                ): selector.TimeSelector(),
                 vol.Required(
                     CONF_DAILY_INTERVAL_HOURS,
-                    default=current.get(CONF_DAILY_INTERVAL_HOURS, DEFAULT_DAILY_INTERVAL_HOURS),
-                ): vol.All(vol.Coerce(int), vol.Range(min=MIN_DAILY_INTERVAL_HOURS, max=MAX_DAILY_INTERVAL_HOURS)),
+                    default=current.get(
+                        CONF_DAILY_INTERVAL_HOURS, DEFAULT_DAILY_INTERVAL_HOURS
+                    ),
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=MIN_DAILY_INTERVAL_HOURS, max=MAX_DAILY_INTERVAL_HOURS
+                    ),
+                ),
                 vol.Required(
                     CONF_HOURLY_INTERVAL_MINUTES,
-                    default=current.get(CONF_HOURLY_INTERVAL_MINUTES, DEFAULT_HOURLY_INTERVAL_MINUTES),
+                    default=current.get(
+                        CONF_HOURLY_INTERVAL_MINUTES, DEFAULT_HOURLY_INTERVAL_MINUTES
+                    ),
                 ): vol.All(
-                    vol.Coerce(int), vol.Range(min=MIN_HOURLY_INTERVAL_MINUTES, max=MAX_HOURLY_INTERVAL_MINUTES)
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=MIN_HOURLY_INTERVAL_MINUTES, max=MAX_HOURLY_INTERVAL_MINUTES
+                    ),
                 ),
-                vol.Required(CONF_DAY_M, default=current.get(CONF_DAY_M, DEFAULT_DAY_M)): bool,
-                vol.Required(CONF_DAY_T, default=current.get(CONF_DAY_T, DEFAULT_DAY_T)): bool,
-                vol.Required(CONF_DAY_W, default=current.get(CONF_DAY_W, DEFAULT_DAY_W)): bool,
-                vol.Required(CONF_DAY_R, default=current.get(CONF_DAY_R, DEFAULT_DAY_R)): bool,
-                vol.Required(CONF_DAY_F, default=current.get(CONF_DAY_F, DEFAULT_DAY_F)): bool,
-                vol.Required(CONF_DAY_SA, default=current.get(CONF_DAY_SA, DEFAULT_DAY_SA)): bool,
-                vol.Required(CONF_DAY_SU, default=current.get(CONF_DAY_SU, DEFAULT_DAY_SU)): bool,
+                vol.Required(
+                    CONF_DAY_M, default=current.get(CONF_DAY_M, DEFAULT_DAY_M)
+                ): bool,
+                vol.Required(
+                    CONF_DAY_T, default=current.get(CONF_DAY_T, DEFAULT_DAY_T)
+                ): bool,
+                vol.Required(
+                    CONF_DAY_W, default=current.get(CONF_DAY_W, DEFAULT_DAY_W)
+                ): bool,
+                vol.Required(
+                    CONF_DAY_R, default=current.get(CONF_DAY_R, DEFAULT_DAY_R)
+                ): bool,
+                vol.Required(
+                    CONF_DAY_F, default=current.get(CONF_DAY_F, DEFAULT_DAY_F)
+                ): bool,
+                vol.Required(
+                    CONF_DAY_SA, default=current.get(CONF_DAY_SA, DEFAULT_DAY_SA)
+                ): bool,
+                vol.Required(
+                    CONF_DAY_SU, default=current.get(CONF_DAY_SU, DEFAULT_DAY_SU)
+                ): bool,
                 vol.Required(
                     CONF_SHOW_STUDENT_TRACKERS,
-                    default=current.get(CONF_SHOW_STUDENT_TRACKERS, DEFAULT_SHOW_STUDENT_TRACKERS),
+                    default=current.get(
+                        CONF_SHOW_STUDENT_TRACKERS, DEFAULT_SHOW_STUDENT_TRACKERS
+                    ),
                 ): bool,
                 vol.Required(
                     CONF_SHOW_BUS_TRACKERS,
-                    default=current.get(CONF_SHOW_BUS_TRACKERS, DEFAULT_SHOW_BUS_TRACKERS),
+                    default=current.get(
+                        CONF_SHOW_BUS_TRACKERS, DEFAULT_SHOW_BUS_TRACKERS
+                    ),
                 ): bool,
             }
         )

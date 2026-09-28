@@ -28,7 +28,9 @@ async def async_setup_entry(
 class _FirstViewSelect(CoordinatorEntity[FirstViewCoordinator], SelectEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, unique: str, name: str) -> None:
+    def __init__(
+        self, coordinator: FirstViewCoordinator, entry_id: str, unique: str, name: str
+    ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._attr_unique_id = f"{entry_id}_{unique}"
@@ -61,10 +63,14 @@ class FirstViewNotificationIdSelect(_FirstViewSelect):
 
 
 class FirstViewNotificationStatusSelect(_FirstViewSelect):
-    _attr_options = ["CREATED", "READ"]
-
     def __init__(self, coordinator: FirstViewCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id, "notification_status", "Notification Status")
+        super().__init__(
+            coordinator, entry_id, "notification_status", "Notification Status"
+        )
+
+    @property
+    def options(self) -> list[str]:
+        return ["CREATED", "READ"]
 
     @property
     def current_option(self) -> str | None:

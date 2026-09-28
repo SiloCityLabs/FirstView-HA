@@ -1,0 +1,11 @@
+# Test dependencies for the FirstView integration
+pytest
+pytest-asyncio
+pytest-cov
+pytest-homeassistant-custom-component
+
+# Home Assistant test utilities. 2026.9+ requires Python >= 3.14.2.
+homeassistant
+
+# Integration requirement (see manifest.json)
+pycognito==2024.5.1

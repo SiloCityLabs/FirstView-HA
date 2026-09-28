@@ -16,6 +16,7 @@ from .const import (
     CONF_AM_ENABLED,
     CONF_AM_END,
     CONF_AM_START,
+    CONF_DAILY_INTERVAL_HOURS,
     CONF_DAY_F,
     CONF_DAY_M,
     CONF_DAY_R,
@@ -23,17 +24,17 @@ from .const import (
     CONF_DAY_SU,
     CONF_DAY_T,
     CONF_DAY_W,
-    CONF_DAILY_INTERVAL_HOURS,
     CONF_EMAIL,
-    CONF_PASSWORD,
-    CONF_PRESET,
     CONF_HOURLY_INTERVAL_MINUTES,
+    CONF_PASSWORD,
     CONF_PM_ENABLED,
     CONF_PM_END,
     CONF_PM_START,
+    CONF_PRESET,
     DEFAULT_AM_ENABLED,
     DEFAULT_AM_END,
     DEFAULT_AM_START,
+    DEFAULT_DAILY_INTERVAL_HOURS,
     DEFAULT_DAY_F,
     DEFAULT_DAY_M,
     DEFAULT_DAY_R,
@@ -41,17 +42,21 @@ from .const import (
     DEFAULT_DAY_SU,
     DEFAULT_DAY_T,
     DEFAULT_DAY_W,
-    DEFAULT_DAILY_INTERVAL_HOURS,
-    DEFAULT_PRESET,
     DEFAULT_HOURLY_INTERVAL_MINUTES,
     DEFAULT_PM_ENABLED,
     DEFAULT_PM_END,
     DEFAULT_PM_START,
+    DEFAULT_PRESET,
     DOMAIN,
 )
 from .coordinator import FirstViewConfig, FirstViewCoordinator, _parse_hhmm
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.DEVICE_TRACKER, Platform.BUTTON, Platform.SELECT]
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.DEVICE_TRACKER,
+    Platform.BUTTON,
+    Platform.SELECT,
+]
 _STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 _BRAND_DIR = Path(__file__).parent / "brand"
 
@@ -145,6 +150,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return ok
 
 
-async def async_update_options_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def async_update_options_listener(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Reload config entry when options change."""
     await hass.config_entries.async_reload(entry.entry_id)

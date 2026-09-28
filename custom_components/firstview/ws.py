@@ -14,7 +14,11 @@ from aiohttp import ClientSession, WSMessage, WSMsgType
 from homeassistant.util import dt as dt_util
 
 from .api import FirstViewClient
-from .const import WS_BACKOFF_MAX_SECONDS, WS_BACKOFF_MIN_SECONDS, WS_WINDOW_SLEEP_SECONDS
+from .const import (
+    WS_BACKOFF_MAX_SECONDS,
+    WS_BACKOFF_MIN_SECONDS,
+    WS_WINDOW_SLEEP_SECONDS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,10 +89,12 @@ class FirstViewWebsocketManager:
                     await self._consume(ws)
             except asyncio.CancelledError:
                 raise
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001 - reconnect on any socket or payload error
                 self.connected = False
                 self.last_error = str(err)
-                wait_seconds = min(backoff + random.uniform(0, 0.8), WS_BACKOFF_MAX_SECONDS)
+                wait_seconds = min(
+                    backoff + random.uniform(0, 0.8), WS_BACKOFF_MAX_SECONDS
+                )
                 _LOGGER.warning("Websocket reconnect in %.1fs: %s", wait_seconds, err)
                 await asyncio.sleep(wait_seconds)
                 backoff = min(backoff * 2, WS_BACKOFF_MAX_SECONDS)
@@ -101,13 +107,18 @@ class FirstViewWebsocketManager:
             vehicle_ids = list(self._last_vehicle_ids)
         if trip_ids:
             await ws.send_str(
-                json.dumps({"type": "live.update.request", "payload": {"tripIds": trip_ids}})
+                json.dumps(
+                    {"type": "live.update.request", "payload": {"tripIds": trip_ids}}
+                )
             )
             self._last_trip_ids = sorted(set(trip_ids))
         if vehicle_ids:
             await ws.send_str(
                 json.dumps(
-                    {"type": "live.tracking.request", "payload": {"vehicleIds": vehicle_ids}}
+                    {
+                        "type": "live.tracking.request",
+                        "payload": {"vehicleIds": vehicle_ids},
+                    }
                 )
             )
             self._last_vehicle_ids = sorted(set(vehicle_ids))
@@ -122,7 +133,10 @@ class FirstViewWebsocketManager:
                     ts = self._extract_event_ts(payload)
                     if ts is not None:
                         self.last_lag_seconds = max(
-                            0.0, (dt_util.utcnow().replace(tzinfo=None) - ts).total_seconds()
+                            0.0,
+                            (
+                                dt_util.utcnow().replace(tzinfo=None) - ts
+                            ).total_seconds(),
                         )
                     self._on_event_cb(payload)
             elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
@@ -135,13 +149,18 @@ class FirstViewWebsocketManager:
         next_vehicles = sorted(set(vehicle_ids))
         if next_trips and next_trips != self._last_trip_ids:
             await ws.send_str(
-                json.dumps({"type": "live.update.request", "payload": {"tripIds": next_trips}})
+                json.dumps(
+                    {"type": "live.update.request", "payload": {"tripIds": next_trips}}
+                )
             )
             self._last_trip_ids = next_trips
         if next_vehicles and next_vehicles != self._last_vehicle_ids:
             await ws.send_str(
                 json.dumps(
-                    {"type": "live.tracking.request", "payload": {"vehicleIds": next_vehicles}}
+                    {
+                        "type": "live.tracking.request",
+                        "payload": {"vehicleIds": next_vehicles},
+                    }
                 )
             )
             self._last_vehicle_ids = next_vehicles
@@ -152,7 +171,7 @@ class FirstViewWebsocketManager:
         try:
             data = json.loads(msg.data)
             return data if isinstance(data, dict) else {"raw": data}
-        except Exception:
+        except Exception:  # noqa: BLE001 - non-JSON frames are kept as raw text
             return {"raw_text": msg.data}
 
     def _extract_event_ts(self, payload: dict[str, Any]) -> datetime | None:
@@ -163,8 +182,10 @@ class FirstViewWebsocketManager:
         if not isinstance(raw, str):
             return None
         try:
-            return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
-        except Exception:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(
+                tzinfo=None
+            )
+        except Exception:  # noqa: BLE001 - unparseable timestamps are dropped
             return None
 
     @property

@@ -36,9 +36,7 @@ def _coords_visible(data: dict[str, Any], vehicle_id: str) -> bool:
         return False
     meta = (data.get("vehicle_meta") or {}).get(vehicle_id) or {}
     status = str(meta.get("status") or "").upper()
-    if meta and status not in ("", "LIVE"):
-        return False
-    return True
+    return not (meta and status not in ("", "LIVE"))
 
 
 def _tracker_options(entry: ConfigEntry) -> tuple[bool, bool]:
@@ -107,7 +105,9 @@ async def async_setup_entry(
                 if sid_str in known_students:
                     continue
                 known_students.add(sid_str)
-                new_entities.append(FirstViewStudentTracker(coordinator, entry.entry_id, student))
+                new_entities.append(
+                    FirstViewStudentTracker(coordinator, entry.entry_id, student)
+                )
 
         if show_buses:
             candidate_vids: set[str] = set()
@@ -129,7 +129,9 @@ async def async_setup_entry(
                 if vid in known_buses:
                     continue
                 known_buses.add(vid)
-                new_entities.append(FirstViewBusTracker(coordinator, entry.entry_id, vid))
+                new_entities.append(
+                    FirstViewBusTracker(coordinator, entry.entry_id, vid)
+                )
 
         if new_entities:
             async_add_entities(new_entities)
@@ -147,7 +149,9 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
     _attr_entity_picture = BUS_MAP_ENTITY_PICTURE
     _attr_source_type = SourceType.GPS
 
-    def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, student: dict[str, Any]) -> None:
+    def __init__(
+        self, coordinator: FirstViewCoordinator, entry_id: str, student: dict[str, Any]
+    ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._student = student
@@ -172,7 +176,9 @@ class FirstViewStudentTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEn
 
     @property
     def device_info(self) -> DeviceInfo:
-        mapping: dict[str, str] = (self.coordinator.data or {}).get("student_vehicle_map", {})
+        mapping: dict[str, str] = (self.coordinator.data or {}).get(
+            "student_vehicle_map", {}
+        )
         vehicle = mapping.get(self._sid)
         info = DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry_id}_student_{self._sid}")},
@@ -228,14 +234,20 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
     _attr_source_type = SourceType.GPS
     _attr_force_update = True
 
-    def __init__(self, coordinator: FirstViewCoordinator, entry_id: str, vehicle_id: str) -> None:
+    def __init__(
+        self, coordinator: FirstViewCoordinator, entry_id: str, vehicle_id: str
+    ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._vehicle_id = vehicle_id
         self._attr_unique_id = f"{entry_id}_bus_{vehicle_id}"
 
     def _meta(self) -> dict[str, Any]:
-        return (self.coordinator.data or {}).get("vehicle_meta", {}).get(self._vehicle_id, {})
+        return (
+            (self.coordinator.data or {})
+            .get("vehicle_meta", {})
+            .get(self._vehicle_id, {})
+        )
 
     def _event(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
@@ -277,7 +289,9 @@ class FirstViewBusTracker(CoordinatorEntity[FirstViewCoordinator], TrackerEntity
         ws_diag = (self.coordinator.data or {}).get("ws_diagnostics", {})
         meta = self._meta()
         event_age = _event_age_seconds(event.get("eventTimestamp"))
-        stop_info = (self.coordinator.data or {}).get("vehicle_stops", {}).get(self._vehicle_id) or {}
+        stop_info = (self.coordinator.data or {}).get("vehicle_stops", {}).get(
+            self._vehicle_id
+        ) or {}
         stops_left = stop_info.get("stops_left")
         return {
             "vehicle_id": self._vehicle_id,
@@ -313,6 +327,8 @@ def _event_age_seconds(timestamp: str | None) -> float | None:
         return None
     try:
         parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-    except Exception:
+    except Exception:  # noqa: BLE001 - unparseable timestamps are treated as stale
         return None
-    return max(0.0, (dt_util.utcnow().replace(tzinfo=parsed.tzinfo) - parsed).total_seconds())
+    return max(
+        0.0, (dt_util.utcnow().replace(tzinfo=parsed.tzinfo) - parsed).total_seconds()
+    )

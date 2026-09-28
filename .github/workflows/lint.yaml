@@ -1,0 +1,35 @@
+name: Lint
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**.py"
+  push:
+    branches:
+      - main
+    paths:
+      - "**.py"
+
+jobs:
+  lint-ruff:
+    name: lint-ruff
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install Ruff
+        run: pip install ruff==0.16.8
+
+      - name: Run Ruff format
+        run: |
+          ruff format --check .
+          ruff check .
