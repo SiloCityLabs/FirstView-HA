@@ -77,8 +77,11 @@ Example automation for route **RT-12** (copy and change `RT-12` → your other r
 alias: "FirstView: RT-12 bus near home"
 id: firstview_bus_rt12_near_home
 description: >
-  Notify when FirstView route RT-12 bus is within 2000 ft of home.
-  Matches by route so vehicle ID changes still work; one alert per bus (not per kid).
+  Notify when FirstView route RT-12 bus is within 2000 ft of home
+  and within 3 stops of the house. If the bus is already inside that
+  circle, a second trigger fires when stops-left crosses into 2 or fewer
+  (including a jump past the house) unless this automation already ran
+  in the last 90 minutes.
 mode: single
 max_exceeded: silent
 triggers:
