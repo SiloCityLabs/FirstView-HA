@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from aiohttp import ClientSession, WSMessage, WSMsgType
+from aiohttp import ClientResponseError, ClientSession, WSMessage, WSMsgType
 from homeassistant.util import dt as dt_util
 
 from .api import FirstViewClient
@@ -91,11 +91,18 @@ class FirstViewWebsocketManager:
                 raise
             except Exception as err:  # noqa: BLE001 - reconnect on any socket or payload error
                 self.connected = False
-                self.last_error = str(err)
+                # aiohttp handshake errors include the request URL, which carries
+                # our bearer token. Keep only non-sensitive error metadata for
+                # logs and diagnostics exposed through entity attributes.
+                self.last_error = type(err).__name__
+                if isinstance(err, ClientResponseError):
+                    self.last_error += f" (HTTP {err.status})"
                 wait_seconds = min(
                     backoff + random.uniform(0, 0.8), WS_BACKOFF_MAX_SECONDS
                 )
-                _LOGGER.warning("Websocket reconnect in %.1fs: %s", wait_seconds, err)
+                _LOGGER.warning(
+                    "Websocket reconnect in %.1fs: %s", wait_seconds, self.last_error
+                )
                 await asyncio.sleep(wait_seconds)
                 backoff = min(backoff * 2, WS_BACKOFF_MAX_SECONDS)
 
